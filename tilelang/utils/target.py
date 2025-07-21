@@ -71,7 +71,8 @@ def determine_target(target: Union[str, Target, Literal["auto"]] = "auto",
         elif is_hip_available:
             return_var = "hip"
         else:
-            raise ValueError("No CUDA or HIP available on this system.")
+            # raise ValueError("No CUDA or HIP available on this system.")
+            pass
     else:
         # Validate the target if it's not "auto"
         assert isinstance(
