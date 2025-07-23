@@ -10,7 +10,7 @@ from tvm import tir
 from tvm.relay import TensorType
 from tilelang.jit.adapter.wrapper import TLWrapper
 from tilelang.jit.adapter.libgen import LibraryGenerator
-from tilelang.jit.adapter.utils import is_cuda_target, is_hip_target, is_cpu_target
+from tilelang.jit.adapter.utils import is_cuda_target, is_hip_target, is_cpu_target, is_metal_target
 from tilelang.utils.target import determine_target
 from tilelang.utils.language import retrieve_func_from_module
 from tilelang.utils.tensor import map_torch_type
@@ -413,6 +413,8 @@ class CythonKernelAdapter(BaseKernelAdapter):
             device = torch.device("cuda")
         elif is_cpu_target(self.target):
             device = torch.device("cpu")
+        elif is_metal_target(self.target):
+            device = torch.device("mps")
         else:
             raise ValueError(f"Unsupported target: {self.target}")
 
