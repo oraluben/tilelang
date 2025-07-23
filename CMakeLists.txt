@@ -4,6 +4,8 @@
 cmake_minimum_required(VERSION 3.18)
 project(TILE_LANG C CXX)
 
+set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+
 # Set default build type to Release if not provided
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
@@ -151,6 +153,14 @@ if(USE_ROCM)
     src/target/rt_mod_hip.cc
   )
   list(APPEND TILE_LANG_SRCS ${TILE_LANG_HIP_SRCS})
+endif()
+
+if(USE_METAL)
+  tilelang_file_glob(GLOB TILE_LANG_CUDA_SRCS
+    src/runtime/*.cc
+    src/target/codegen_metal.cc
+  )
+  list(APPEND TILE_LANG_SRCS ${TILE_LANG_CUDA_SRCS})
 endif()
 
 message(STATUS "Collected source files: ${TILE_LANG_SRCS}")

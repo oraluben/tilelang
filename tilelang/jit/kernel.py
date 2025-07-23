@@ -217,6 +217,7 @@ class JITKernel(object):
                 target_host=target_host,
                 enable_host_codegen=enable_host_codegen,
                 enable_device_compile=enable_device_compile)
+        assert False, f'{artifact.kernel_source}'
 
         self.artifact = artifact
 
