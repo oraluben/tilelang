@@ -50,25 +50,6 @@ public:
   void VisitStmt_(const AssertStmtNode *op) final;
   void VisitStmt_(const AllocateConstNode *op) final;
   void VisitStmt_(const WhileNode *op) final;
-
-private:
-  /*!
-   * \brief Enforce value to be U32.
-   */
-  static PrimExpr EnforceU32(PrimExpr value);
-  /*!
-   * \brief Storage type of bool values.
-   */
-  DataType boolean_storage_type_{DataType::Int(8)};
-
-  // whether enable fp16
-  bool enable_fp16_{false};
-
-  /*! \brief the header stream for function label and enable directive if any,
-   * goes before any other declaration */
-  std::ostringstream header_stream;
-
-  Target target_;
 };
 } // namespace codegen
 } // namespace tvm
