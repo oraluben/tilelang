@@ -5,8 +5,7 @@
 #include "target/source/codegen_c.h"
 
 
-namespace tvm {
-namespace codegen {
+namespace tvm::codegen {
 
 /*!
  * \brief WebGPU code generator.
@@ -17,12 +16,10 @@ namespace codegen {
  */
 class CodeGenTileLangMetal final : public CodeGenC {
 public:
-  explicit CodeGenTileLangMetal(Target target);
+  CodeGenTileLangMetal();
+
   // overrides
-  std::string Finish() final;
-  using CodeGenC::AddFunction;
-  runtime::FunctionInfo AddFunction(const PrimFunc &f,
-                                    bool skip_readonly_decl); // NOLINT(*)
+  auto Finish() -> std::string final;
   void InitFuncState(const PrimFunc &f) final;
   void PrintStorageSync(const CallNode *op) final;    // NOLINT(*)
   void PrintType(DataType t, std::ostream &os) final; // NOLINT(*)
@@ -51,5 +48,4 @@ public:
   void VisitStmt_(const AllocateConstNode *op) final;
   void VisitStmt_(const WhileNode *op) final;
 };
-} // namespace codegen
-} // namespace tvm
+} // namespace tvm::codegen
