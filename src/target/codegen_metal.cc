@@ -78,7 +78,9 @@ auto BuildTileLangMetal(const IRModule &mod, const Target &target)
   return runtime::MetalModuleCreate(smap, fmap, "metal", code);
 }
 
-const TVM_REGISTER_GLOBAL("target.build.tilelang_metal")
-    .set_body_typed(BuildTileLangMetal);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("target.build.tilelang_metal", BuildTileLangMetal);
+});
 
 } // namespace tvm::codegen
