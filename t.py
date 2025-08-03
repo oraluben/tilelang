@@ -66,9 +66,12 @@ y1 = []
 y2 = []
 y3 = []
 
+device = 'mps'
+device = 'cpu'
+
 for size in sizes:
-    a = torch.randn(size, device='mps')
-    b = torch.randn(size, device='mps')
-    c = torch.zeros(size, device='mps')
+    a = torch.randn(size, device=device)
+    b = torch.randn(size, device=device)
+    c = torch.zeros(size, device=device)
 
     tile_add(a, b, c, size)

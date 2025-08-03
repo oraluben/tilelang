@@ -156,11 +156,11 @@ if(USE_ROCM)
 endif()
 
 if(USE_METAL)
-  tilelang_file_glob(GLOB TILE_LANG_CUDA_SRCS
+  tilelang_file_glob(GLOB TILE_LANG_METAL_SRCS
     src/runtime/*.cc
     src/target/codegen_metal.cc
   )
-  list(APPEND TILE_LANG_SRCS ${TILE_LANG_CUDA_SRCS})
+  list(APPEND TILE_LANG_SRCS ${TILE_LANG_METAL_SRCS})
 endif()
 
 message(STATUS "Collected source files: ${TILE_LANG_SRCS}")

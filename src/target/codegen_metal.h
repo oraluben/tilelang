@@ -1,9 +1,11 @@
 #include <tvm/target/codegen.h>
+#include <tvm/tir/expr.h>
+#include <tvm/tir/op.h>
 
 #include <string>
+// #include <unordered_map>
 
 #include "target/source/codegen_c.h"
-
 
 namespace tvm::codegen {
 
@@ -17,6 +19,7 @@ namespace tvm::codegen {
 class CodeGenTileLangMetal final : public CodeGenC {
 public:
   CodeGenTileLangMetal();
+  void AddFunction(const GlobalVar &gvar, const PrimFunc &f) override;
 
   // overrides
   auto Finish() -> std::string final;
@@ -28,24 +31,5 @@ public:
   // assignment printing
   void PrintSSAAssign(const std::string &target, const std::string &src,
                       DataType type) final;
-
-  // overload visitor
-  void VisitExpr_(const BroadcastNode *op, std::ostream &os) final; // NOLINT(*)
-  void VisitExpr_(const CallNode *op, std::ostream &os) final;      // NOLINT(*)
-  void VisitExpr_(const BufferLoadNode *op,
-                  std::ostream &os) final;                          // NOLINT(*)
-  void VisitExpr_(const CastNode *op, std::ostream &os) final;      // NOLINT(*)
-  void VisitExpr_(const SelectNode *op, std::ostream &os) override; // NOLINT(*)
-  void VisitExpr_(const FloatImmNode *op, std::ostream &os) final;  // NOLINT(*)
-  void VisitExpr_(const IntImmNode *op, std::ostream &os) final;    // NOLINT(*)
-
-  // stmt printing
-  void VisitStmt_(const LetStmtNode *op) final;
-  void VisitStmt_(const BufferStoreNode *op) final;
-  void VisitStmt_(const ForNode *op) final;
-  void VisitStmt_(const AllocateNode *op) final;
-  void VisitStmt_(const AssertStmtNode *op) final;
-  void VisitStmt_(const AllocateConstNode *op) final;
-  void VisitStmt_(const WhileNode *op) final;
 };
 } // namespace tvm::codegen
