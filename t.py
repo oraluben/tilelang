@@ -4,7 +4,7 @@ import tilelang.language as T
 import torch
 
 
-@tilelang.jit
+@tilelang.jit(execution_backend="nvrtc")
 def add(M, block_M, dtype="float32"):
 
     @T.prim_func
@@ -67,7 +67,7 @@ y2 = []
 y3 = []
 
 device = 'mps'
-device = 'cpu'
+# device = 'cpu'
 
 for size in sizes:
     a = torch.randn(size, device=device)

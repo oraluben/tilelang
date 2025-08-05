@@ -148,7 +148,7 @@ class LibraryGenerator(object):
         command += ["-o", libpath]
 
         src.write(self.lib_code)
-        assert False, self.lib_code
+        print(f'lib_code: {self.lib_code}')
         src.flush()
 
         try:

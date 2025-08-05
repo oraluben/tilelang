@@ -1014,6 +1014,11 @@ class TLMetalSourceWrapper(object):
         self.pass_configs = pass_configs
         self.device_mod = device_mod
         self.host_mod = host_mod
+        self.lib_code = self.update_lib_code(source)
+
+    def update_lib_code(self, code: str):
+        self.lib_code = code
+        return self.lib_code
 
 
 class TLWrapper(BaseWrapper):

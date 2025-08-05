@@ -244,3 +244,28 @@ class NVRTCKernelAdapter(BaseKernelAdapter):
     def prim_func(self) -> tir.PrimFunc:
         """Returns the primary TIR function from the IR module."""
         return retrieve_func_from_module(self.ir_module)
+
+
+class MetalKernelAdapter(BaseKernelAdapter):
+    def __init__(self,
+                 params: List[KernelParam],
+                 result_idx: List[int],
+                 target: Union[str, Target],
+                 func_or_mod: Union[tir.PrimFunc, tvm.IRModule],
+                 host_mod: Optional[tvm.IRModule] = None,
+                 device_mod: Optional[tvm.IRModule] = None,
+                 kernel_global_source: Optional[str] = None,
+                 verbose: bool = False,
+                 pass_configs: Optional[Dict[str, Any]] = None,
+                 compile_flags: Optional[List[str]] = None):
+        self._post_init()
+
+    def _convert_torch_func(self) -> Callable:
+        return self._wrap_forward_from_prebuild_lib
+
+    def _wrap_forward_from_prebuild_lib(self,
+                                        *ins: List[torch.Tensor],
+                                        stream: Optional[int] = None):
+        print(self, ins, stream)
+        a, b, c = ins
+        raise NotImplementedError('calling kernel')

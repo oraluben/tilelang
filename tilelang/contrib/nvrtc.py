@@ -108,3 +108,11 @@ def compile_cuda(code: str,
         program)[0] == nvrtc.nvrtcResult.NVRTC_SUCCESS, f"Failed to destroy program: {result}"
 
     return result_bytes
+
+
+def compile_metal(code: str,
+                  target_format: Literal["metallib"] = "metallib",
+                  arch: Optional[int] = None,
+                  options: Optional[Union[str, List[str]]] = None,
+                  verbose: bool = False) -> bytearray:
+    pass
