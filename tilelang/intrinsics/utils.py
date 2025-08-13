@@ -9,9 +9,20 @@ from .mma_layout import (
 )
 from .mfma_layout import (thread_id_shared_access_64x4_to_16x16_layout_C_n_m)
 
+from .metal_layout import (
+    ldsimdgroup_32x8_to_shared_16x16_layout,
+    ldsimdgroup_trans_32x8_to_shared_16x16_layout,
+    ldsimdgroup_16x32_to_shared_16x32_layout_a,
+    ldsimdgroup_16x32_to_shared_16x32_layout_b,
+    simdgroup_store_32x8_to_shared_16x16_layout,
+    thread_id_shared_access_64x4_to_16x16_layout_C_n_m as metal_thread_id_shared_access_64x4_to_16x16_layout_C_n_m,
+)
+
 from .mma_layout import get_swizzle_layout  # noqa: F401
 from .mma_layout import make_mma_swizzle_layout  # noqa: F401
 from .mfma_layout import make_mfma_swizzle_layout  # noqa: F401
+from .metal_layout import make_metal_swizzle_layout  # noqa: F401
+from .metal_layout import make_metal_simdgroup_swizzle_layout  # noqa: F401
 
 
 # the original implementation and insight is from the following code snippet
@@ -50,6 +61,41 @@ def get_ldmatrix_offset(
         raise ValueError(f"Unsupported dtype {dtype}")
 
 
+# Metal-specific ldsimdgroup offset function
+def get_ldsimdgroup_offset(
+    matrix: Literal["A", "B"],
+    row_idx,
+    col_idx,
+    stride,
+    dtype: Literal["float16", "int8"] = "float16",
+    transposed: bool = False,
+):
+    assert matrix in ["A", "B"], "matrix should be either A or B"
+    dtype_bits = DataType(dtype).bits
+    if dtype_bits == 16:
+        transform_func = ldsimdgroup_32x8_to_shared_16x16_layout
+        transform_func_trans = ldsimdgroup_trans_32x8_to_shared_16x16_layout
+        if transposed:
+            new_row_idx, new_col_idx = transform_func_trans(row_idx, col_idx)
+            return new_row_idx * stride + new_col_idx
+        else:
+            new_row_idx, new_col_idx = transform_func(row_idx, col_idx)
+            return new_row_idx * stride + new_col_idx
+    elif dtype_bits == 8:
+        if matrix == "B" and transposed:
+            transform_func = ldsimdgroup_16x32_to_shared_16x32_layout_b
+            new_row_idx, new_col_idx = transform_func(row_idx, col_idx)
+            return new_row_idx * stride + new_col_idx
+        elif matrix == "A" and not transposed:
+            transform_func = ldsimdgroup_16x32_to_shared_16x32_layout_a
+            new_row_idx, new_col_idx = transform_func(row_idx, col_idx)
+            return new_row_idx * stride + new_col_idx
+        else:
+            raise ValueError("ldsimdgroup only supports B transposed and A non-transposed for int8")
+    else:
+        raise ValueError(f"Unsupported dtype {dtype}")
+
+
 def shared_16x16_to_mma_32x8_layout(i, j):
     thread_id = 4 * (i % 8) + (j % 8) // 2
     return thread_id, 4 * (j // 8) + (i // 8) * 2 + (j % 2)
@@ -71,6 +117,10 @@ def mma_store_index_map(thread_id, local_id):
 
 def mfma_store_index_map(thread_id, local_id):
     return thread_id_shared_access_64x4_to_16x16_layout_C_n_m(thread_id, local_id)
+
+
+def metal_simdgroup_store_index_map(thread_id, local_id):
+    return metal_thread_id_shared_access_64x4_to_16x16_layout_C_n_m(thread_id, local_id)
 
 
 def get_mma_micro_size(dtype: Literal["float16", "int8"]):
