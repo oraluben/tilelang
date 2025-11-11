@@ -10,6 +10,7 @@ from tilelang.contrib import nvcc
 SUPPORTED_TARGETS: dict[str, str] = {
     "auto": "Auto-detect CUDA/HIP/Metal based on availability.",
     "cuda": "CUDA GPU target (supports options such as `cuda -arch=sm_80`).",
+    "musa": "MUSA GPU target (supports options such as `musa -arch=mp_22`).",
     "hip": "ROCm HIP target (supports options like `hip -mcpu=gfx90a`).",
     "metal": "Apple Metal target for arm64 Macs.",
     "llvm": "LLVM CPU target (accepts standard TVM LLVM options).",
@@ -126,6 +127,8 @@ def determine_target(target: str | Target | Literal["auto"] = "auto",
 def target_is_cuda(target: Target) -> bool:
     return _ffi_api.TargetIsCuda(target)
 
+def target_is_musa(target: Target) -> bool:
+    return _ffi_api.TargetIsMusa(target)
 
 def target_is_hip(target: Target) -> bool:
     return _ffi_api.TargetIsRocm(target)

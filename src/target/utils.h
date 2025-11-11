@@ -13,6 +13,7 @@ namespace tvm {
 namespace tl {
 
 bool TargetIsCuda(Target target);
+bool TargetIsMusa(Target target);
 bool TargetIsRocm(Target target);
 
 bool TargetIsVolta(Target target);

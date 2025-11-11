@@ -3,7 +3,7 @@
 set(TVM_BUILD_FROM_SOURCE TRUE)
 set(TVM_SOURCE ${CMAKE_SOURCE_DIR}/3rdparty/tvm)
 
-if(DEFINED $ENV{TVM_ROOT})
+if(DEFINED ENV{TVM_ROOT})
   if(EXISTS $ENV{TVM_ROOT}/cmake/config.cmake)
     set(TVM_SOURCE $ENV{TVM_ROOT})
   endif()

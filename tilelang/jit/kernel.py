@@ -137,7 +137,7 @@ class JITKernel(Generic[_P, _T]):
 
         # The adapter's function is assigned as the callable function for this instance.
         self.adapter = adapter
-        self.torch_function = adapter.func
+        # self.torch_function = adapter.func
 
     @classmethod
     def from_database(
@@ -235,72 +235,72 @@ class JITKernel(Generic[_P, _T]):
 
         self.artifact = artifact
 
-        # Create an adapter based on the specified execution backend.
-        if execution_backend == "dlpack":
-            # Use TorchDLPackKernelAdapter for interoperability with PyTorch via DLPack.
-            # But we need to ensure that the runtime is enabled and the runtime module is not None.
-            assert tvm.runtime.enabled("llvm"), "DLPack backend requires LLVM runtime."
-            assert (artifact.rt_mod is not None), "DLPack backend requires a runtime module."
-            adapter = TorchDLPackKernelAdapter(
-                artifact.rt_mod, params=artifact.params, result_idx=out_idx)
-        elif execution_backend == "ctypes":
-            adapter = CtypesKernelAdapter(
-                params=artifact.params,
-                result_idx=out_idx,
-                target=target,
-                func_or_mod=tilelang_func,
-                host_mod=artifact.host_mod,
-                device_mod=artifact.device_mod,
-                kernel_global_source=artifact.kernel_source,
-                verbose=verbose,
-                pass_configs=pass_configs,
-                compile_flags=compile_flags,
-            )
-        elif execution_backend == "cython":
-            adapter = CythonKernelAdapter(
-                params=artifact.params,
-                result_idx=out_idx,
-                target=target,
-                func_or_mod=tilelang_func,
-                host_mod=artifact.host_mod,
-                device_mod=artifact.device_mod,
-                kernel_global_source=artifact.kernel_source,
-                verbose=verbose,
-                pass_configs=pass_configs,
-                compile_flags=compile_flags,
-            )
-        elif execution_backend == "nvrtc":
-            adapter = NVRTCKernelAdapter(
-                params=artifact.params,
-                result_idx=out_idx,
-                target=target,
-                func_or_mod=tilelang_func,
-                host_mod=artifact.host_mod,
-                device_mod=artifact.device_mod,
-                kernel_global_source=artifact.kernel_source,
-                verbose=verbose,
-                pass_configs=pass_configs,
-                compile_flags=compile_flags,
-            )
-        elif execution_backend == "torch":
-            assert is_metal_target(target)
-            adapter = MetalKernelAdapter(
-                params=artifact.params,
-                result_idx=out_idx,
-                # target=target,
-                func_or_mod=tilelang_func,
-                # host_mod=artifact.host_mod,
-                device_mod=artifact.device_mod,
-                kernel_global_source=artifact.kernel_source,
-                verbose=verbose,
-                # pass_configs=pass_configs,
-                # compile_flags=compile_flags,
-            )
-        else:
-            # Handle invalid backend.
-            raise ValueError(f"Invalid execution backend: {execution_backend}")
+        # # Create an adapter based on the specified execution backend.
+        # if execution_backend == "dlpack":
+        #     # Use TorchDLPackKernelAdapter for interoperability with PyTorch via DLPack.
+        #     # But we need to ensure that the runtime is enabled and the runtime module is not None.
+        #     assert tvm.runtime.enabled("llvm"), "DLPack backend requires LLVM runtime."
+        #     assert (artifact.rt_mod is not None), "DLPack backend requires a runtime module."
+        #     adapter = TorchDLPackKernelAdapter(
+        #         artifact.rt_mod, params=artifact.params, result_idx=out_idx)
+        # elif execution_backend == "ctypes":
+        #     adapter = CtypesKernelAdapter(
+        #         params=artifact.params,
+        #         result_idx=out_idx,
+        #         target=target,
+        #         func_or_mod=tilelang_func,
+        #         host_mod=artifact.host_mod,
+        #         device_mod=artifact.device_mod,
+        #         kernel_global_source=artifact.kernel_source,
+        #         verbose=verbose,
+        #         pass_configs=pass_configs,
+        #         compile_flags=compile_flags,
+        #     )
+        # elif execution_backend == "cython":
+        #     adapter = CythonKernelAdapter(
+        #         params=artifact.params,
+        #         result_idx=out_idx,
+        #         target=target,
+        #         func_or_mod=tilelang_func,
+        #         host_mod=artifact.host_mod,
+        #         device_mod=artifact.device_mod,
+        #         kernel_global_source=artifact.kernel_source,
+        #         verbose=verbose,
+        #         pass_configs=pass_configs,
+        #         compile_flags=compile_flags,
+        #     )
+        # elif execution_backend == "nvrtc":
+        #     adapter = NVRTCKernelAdapter(
+        #         params=artifact.params,
+        #         result_idx=out_idx,
+        #         target=target,
+        #         func_or_mod=tilelang_func,
+        #         host_mod=artifact.host_mod,
+        #         device_mod=artifact.device_mod,
+        #         kernel_global_source=artifact.kernel_source,
+        #         verbose=verbose,
+        #         pass_configs=pass_configs,
+        #         compile_flags=compile_flags,
+        #     )
+        # elif execution_backend == "torch":
+        #     assert is_metal_target(target)
+        #     adapter = MetalKernelAdapter(
+        #         params=artifact.params,
+        #         result_idx=out_idx,
+        #         # target=target,
+        #         func_or_mod=tilelang_func,
+        #         # host_mod=artifact.host_mod,
+        #         device_mod=artifact.device_mod,
+        #         kernel_global_source=artifact.kernel_source,
+        #         verbose=verbose,
+        #         # pass_configs=pass_configs,
+        #         # compile_flags=compile_flags,
+        #     )
+        # else:
+        #     # Handle invalid backend.
+        #     raise ValueError(f"Invalid execution backend: {execution_backend}")
 
-        return adapter
+        # return adapter
 
     def _create_adapter_from_database(self,
                                       params: list[KernelParam],
@@ -401,8 +401,8 @@ class JITKernel(Generic[_P, _T]):
         str
             The source code of the compiled kernel function.
         """
-        if self.execution_backend in {"ctypes", "cython", "nvrtc"}:
-            return self.adapter.get_kernel_source()
+        # if self.execution_backend in {"ctypes", "cython", "nvrtc"}:
+        #     return self.adapter.get_kernel_source()
         return self.artifact.kernel_source
 
     def get_host_source(self) -> str:

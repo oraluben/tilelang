@@ -15,29 +15,29 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules" AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
-  find_package(Git QUIET)
-  if(Git_FOUND)
-    execute_process(
-      COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      RESULT_VARIABLE TILELANG_GIT_SUBMODULE_RESULT
-    )
-    if(NOT TILELANG_GIT_SUBMODULE_RESULT EQUAL 0)
-      message(
-        FATAL_ERROR
-          "Failed to initialize git submodules. Please run "
-          "`git submodule update --init --recursive` and re-run CMake."
-      )
-    endif()
-  else()
-    message(
-      FATAL_ERROR
-        "Git is required to initialize TileLang submodules. "
-        "Please install git or fetch the submodules manually."
-    )
-  endif()
-endif()
+# if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.gitmodules" AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+#   find_package(Git QUIET)
+#   if(Git_FOUND)
+#     execute_process(
+#       COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+#       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+#       RESULT_VARIABLE TILELANG_GIT_SUBMODULE_RESULT
+#     )
+#     if(NOT TILELANG_GIT_SUBMODULE_RESULT EQUAL 0)
+#       message(
+#         FATAL_ERROR
+#           "Failed to initialize git submodules. Please run "
+#           "`git submodule update --init --recursive` and re-run CMake."
+#       )
+#     endif()
+#   else()
+#     message(
+#       FATAL_ERROR
+#         "Git is required to initialize TileLang submodules. "
+#         "Please install git or fetch the submodules manually."
+#     )
+#   endif()
+# endif()
 
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
@@ -68,11 +68,13 @@ endif()
 set(USE_CUDA OFF)
 set(USE_ROCM OFF)
 set(USE_METAL OFF)
+set(USE_MUSA OFF)
 set(PREBUILD_CYTHON ON)
 # Configs end
 
 include(cmake/load_tvm.cmake)
 
+message("TVM SOURCE:" ${TVM_SOURCE})
 if(EXISTS ${TVM_SOURCE}/cmake/config.cmake)
   include(${TVM_SOURCE}/cmake/config.cmake)
 else()
@@ -103,6 +105,8 @@ elseif(APPLE)
   set(USE_METAL ON)
 elseif($ENV{USE_ROCM})
   set(USE_ROCM ON)
+elseif($ENV{USE_MUSA})
+  set(USE_MUSA ON)
 else()
   if($ENV{USE_CUDA})
     set(USE_CUDA ON)
@@ -134,7 +138,30 @@ elseif(USE_ROCM)
   )
   list(APPEND TILE_LANG_SRCS ${TILE_LANG_HIP_SRCS})
   list(APPEND TILE_LANG_INCLUDES ${ROCM_INCLUDE_DIRS})
+elseif(USE_MUSA)
+  if(DEFINED ENV{MUSA_HOME})
+    set(MUSA_HOME $ENV{MUSA_HOME})
+  else()
+    set(MUSA_HOME "/usr/local/musa")
+  endif()
+  list(APPEND CMAKE_MODULE_PATH ${MUSA_HOME}/cmake)
+  find_package(MUSAToolkit REQUIRED)
+  if(NOT MUSAToolkit_FOUND)
+    message(FATAL_ERROR "Cannot find MUSA, USE_MUSA=" ${USE_MUSA})
+  endif()
+  message(STATUS "Build with MUSA ${MUSAToolkit_VERSION} support")
+  file(GLOB TILE_LANG_MUSA_SRCS
+    src/target/codegen_musa.cc
+    src/target/ptx.cc
+    src/target/rt_mod_musa.cc
+  )
+  set_property(SOURCE
+    ${TILE_LANG_MUSA_SRCS}
+    APPEND PROPERTY INCLUDE_DIRECTORIES ${MUSAToolkit_INCLUDE_DIRS})
+
+  list(APPEND TILE_LANG_SRCS ${TILE_LANG_MUSA_SRCS})
 elseif(USE_CUDA)
+  message(STATUS "Build with MUSA ${CUDAToolkit_VERSION} support")
   set(CMAKE_CUDA_STANDARD 17)
   find_package(CUDAToolkit REQUIRED)
   set(CMAKE_CUDA_COMPILER "${CUDAToolkit_BIN_DIR}/nvcc")

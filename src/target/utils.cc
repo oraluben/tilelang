@@ -14,6 +14,9 @@ namespace tl {
 bool TargetIsCuda(Target target) {
   return target->GetTargetDeviceType() == kDLCUDA;
 }
+bool TargetIsMusa(Target target) {
+  return target->GetTargetDeviceType() == kDLMUSA;
+}
 bool TargetIsRocm(Target target) {
   return target->GetTargetDeviceType() == kDLROCM;
 }
@@ -138,6 +141,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("tl.TargetIsCuda",
+           [](Target target) { return TargetIsCuda(target); })
+      .def("tl.TargetIsMusa",
            [](Target target) { return TargetIsCuda(target); })
       .def("tl.TargetIsRocm",
            [](Target target) { return TargetIsRocm(target); })
