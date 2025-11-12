@@ -257,27 +257,30 @@ void CodeGenTileLangMUSA::PrintExtraAttrs(const PrimFunc &f) {
 }
 
 std::string CodeGenTileLangMUSA::Finish() {
-  if (need_mma_h_) {
-    decl_stream << "#include <mma.h>\n";
-  }
-  if (need_mma_instruction_h_) {
-    decl_stream << "#include <tl_templates/musa/instruction/mma.h>\n";
-  }
-  if (need_wgmma_instruction_h_) {
-    decl_stream << "#include <tl_templates/musa/instruction/wgmma.h>\n";
-  }
-  if (need_tcgen05mma_instruction_h_) {
-    decl_stream << "#include <tl_templates/musa/instruction/tcgen05mma.h>\n";
-  }
-  if (need_mma_sm70_instruction_h_) {
-    decl_stream << "#include <tl_templates/musa/instruction/mma_sm70.h>\n";
-  }
-  if (need_tcgen05_common_h_) {
-    decl_stream << "#include <tl_templates/musa/tcgen_05.h>\n";
-  }
-  if (enable_fp8_) {
-    decl_stream << "#include <tl_templates/musa/musa_fp8.h>\n";
-  }
+
+  decl_stream << "#include <tl_templates/musa/common.h>\n";
+
+  // if (need_mma_h_) {
+  //   decl_stream << "#include <mma.h>\n";
+  // }
+  // if (need_mma_instruction_h_) {
+  //   decl_stream << "#include <tl_templates/musa/instruction/mma.h>\n";
+  // }
+  // if (need_wgmma_instruction_h_) {
+  //   decl_stream << "#include <tl_templates/musa/instruction/wgmma.h>\n";
+  // }
+  // if (need_tcgen05mma_instruction_h_) {
+  //   decl_stream << "#include <tl_templates/musa/instruction/tcgen05mma.h>\n";
+  // }
+  // if (need_mma_sm70_instruction_h_) {
+  //   decl_stream << "#include <tl_templates/musa/instruction/mma_sm70.h>\n";
+  // }
+  // if (need_tcgen05_common_h_) {
+  //   decl_stream << "#include <tl_templates/musa/tcgen_05.h>\n";
+  // }
+  // if (enable_fp8_) {
+  //   decl_stream << "#include <tl_templates/musa/musa_fp8.h>\n";
+  // }
 
   if (need_math_constants_h_) {
     decl_stream << "#include <math_constants.h>\n";
@@ -287,18 +290,18 @@ std::string CodeGenTileLangMUSA::Finish() {
     decl_stream << "#include <cooperative_groups.h>\n";
   }
 
-  decl_stream << "#include <tl_templates/musa/gemm.h>\n";
-  if (enable_sparse_gemm_) {
-    decl_stream << "#include <tl_templates/musa/gemm_sp.h>\n";
-  }
-  decl_stream << "#include <tl_templates/musa/copy.h>\n";
-  decl_stream << "#include <tl_templates/musa/reduce.h>\n";
-  decl_stream << "#include <tl_templates/musa/ldsm.h>\n";
-  decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";
-  decl_stream << "#include <tl_templates/musa/debug.h>\n";
-  decl_stream << "#ifdef ENABLE_BF16\n";
-  decl_stream << "#include <tl_templates/musa/musa_bf16_fallbacks.cuh>\n";
-  decl_stream << "#endif\n";
+  // decl_stream << "#include <tl_templates/musa/gemm.h>\n";
+  // if (enable_sparse_gemm_) {
+  //   decl_stream << "#include <tl_templates/musa/gemm_sp.h>\n";
+  // }
+  // decl_stream << "#include <tl_templates/musa/copy.h>\n";
+  // decl_stream << "#include <tl_templates/musa/reduce.h>\n";
+  // decl_stream << "#include <tl_templates/musa/ldsm.h>\n";
+  // decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";
+  // decl_stream << "#include <tl_templates/musa/debug.h>\n";
+  // decl_stream << "#ifdef ENABLE_BF16\n";
+  // decl_stream << "#include <tl_templates/musa/musa_bf16_fallbacks.cuh>\n";
+  // decl_stream << "#endif\n";
 
   if (need_global_barrier_) {
     decl_stream << "__device__ unsigned " << vid_global_barrier_state_

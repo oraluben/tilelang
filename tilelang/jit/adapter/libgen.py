@@ -13,11 +13,12 @@ from tvm.target import Target
 from tilelang import tvm as tvm
 from tilelang.transform import PassConfigKey
 from tilelang.contrib.nvcc import get_nvcc_compiler, get_target_arch, get_target_compute_version
+from tilelang.contrib.mcc import get_mcc_compiler, get_musa_arch, get_musa_compute_version
 from tilelang.contrib.rocm import find_rocm_path, get_rocm_arch
 from tilelang.env import TILELANG_TEMPLATE_PATH
 from tilelang.utils.deprecated import deprecated_warning
 
-from .utils import is_cpu_target, is_cuda_target, is_hip_target
+from .utils import is_cpu_target, is_cuda_target, is_hip_target, is_musa_target
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,21 @@ class LibraryGenerator:
                 command += ["--ptxas-options=--verbose"]
             command += [
                 "-I" + CUTLASS_INCLUDE_DIR,
+            ]
+        elif is_musa_target(target):
+            src = tempfile.NamedTemporaryFile(mode="w", suffix=".mu", delete=False)  # noqa: SIM115
+            target_arch = get_musa_arch(get_musa_compute_version(target))
+            libpath = src.name.replace(".mu", ".so")
+
+            command = [
+                get_mcc_compiler(),
+                src.name,
+                "-std=c++17",
+                "--shared",
+                "-fPIC",
+                # "-lmusart",
+                # "-lmusa",
+                f"--offload-arch=mp_{target_arch}",
             ]
 
         elif is_hip_target(target):

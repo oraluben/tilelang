@@ -83,6 +83,25 @@ def _find_cuda_home() -> str:
     return cuda_home if cuda_home is not None else ""
 
 
+def _find_musa_home() -> str:
+    """Find the MUSA install path."""
+    # Guess #1
+    cuda_home = os.environ.get('MUSA_HOME') or os.environ.get('MUSA_PATH')
+    if cuda_home is None:
+        # Guess #2
+        mcc_path = shutil.which("mcc")
+        if mcc_path is not None:
+            musa_home = os.path.dirname(os.path.dirname(mcc_path))
+        else:
+            # Guess #3
+
+            # Linux/macOS
+            if os.path.exists('/usr/local/musa'):
+                musa_home = '/usr/local/musa'
+
+    return musa_home if musa_home is not None else ""
+
+
 def _find_rocm_home() -> str:
     """Find the ROCM install path."""
     rocm_home = os.environ.get('ROCM_PATH') or os.environ.get('ROCM_HOME')
@@ -214,6 +233,7 @@ class Environment:
     # CUDA/ROCm home directories
     CUDA_HOME = _find_cuda_home()
     ROCM_HOME = _find_rocm_home()
+    MUSA_HOME = _find_musa_home()
 
     # Path to the TileLang package root
     TILELANG_PACKAGE_PATH = pathlib.Path(__file__).resolve().parent
@@ -282,7 +302,7 @@ env = Environment()
 # after initialization.
 CUDA_HOME = env.CUDA_HOME
 ROCM_HOME = env.ROCM_HOME
-
+MUSA_HOME = env.MUSA_HOME
 
 def prepend_pythonpath(path):
     if not os.environ.get("PYTHONPATH", None):

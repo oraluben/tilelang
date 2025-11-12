@@ -4,8 +4,9 @@ from tilelang import tvm as tvm
 from typing import Any
 from tvm import IRModule
 from tvm.target import Target
-from .utils import (is_metal_target, match_declare_kernel, match_declare_kernel_cpu, is_cuda_target,
+from .utils import (is_metal_target, match_declare_kernel, match_declare_kernel_cpu, is_cuda_target, is_musa_target,
                     is_hip_target, is_cpu_target, get_annotated_mod, pythonic_expr)
+from .musa_wrapper import TLMUSASourceWrapper
 import re
 import logging
 import textwrap
@@ -1201,6 +1202,8 @@ class TLWrapper(BaseWrapper):
         assert self.scheduled_ir_module is not None, "Please assign optimized module first."
         if is_cuda_target(self.target):
             wrapper_class = TLCUDASourceWrapper
+        elif is_musa_target(self.target):
+            wrapper_class = TLMUSASourceWrapper
         elif is_hip_target(self.target):
             wrapper_class = TLHIPSourceWrapper
         elif is_cpu_target(self.target):

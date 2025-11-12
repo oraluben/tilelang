@@ -52,6 +52,10 @@ def is_cuda_target(target: Target) -> bool:
     return target.kind.name == "cuda"
 
 
+def is_musa_target(target: Target) -> bool:
+    return target.kind.name == "musa"
+
+
 def is_hip_target(target: Target) -> bool:
     return target.kind.name == "hip"
 
