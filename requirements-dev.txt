@@ -8,8 +8,8 @@ ninja
 packaging
 scikit-build-core
 setuptools>=61
-torch
 wheel
+pytest
 
 auditwheel; platform_system == 'Linux'
 patchelf; platform_system == 'Linux'

@@ -137,7 +137,7 @@ class JITKernel(Generic[_P, _T]):
 
         # The adapter's function is assigned as the callable function for this instance.
         self.adapter = adapter
-        # self.torch_function = adapter.func
+        self.torch_function = adapter.func
 
     @classmethod
     def from_database(
