@@ -1,6 +1,8 @@
 #pragma once
 
 #include <musa_runtime.h>
+#include <musa_bf16.h>
+#include <musa_fp16.h>
 #include <cstdio>
 
 #define uint unsigned int
@@ -30,3 +32,6 @@
       return -1;                                                               \
     }                                                                          \
   } while (0)
+
+using bfloat16_t = __mt_bfloat16;
+using half_t = __half;
