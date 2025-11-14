@@ -294,7 +294,7 @@ std::string CodeGenTileLangMUSA::Finish() {
   // if (enable_sparse_gemm_) {
   //   decl_stream << "#include <tl_templates/musa/gemm_sp.h>\n";
   // }
-  // decl_stream << "#include <tl_templates/musa/copy.h>\n";
+  decl_stream << "#include <tl_templates/musa/copy.h>\n";
   // decl_stream << "#include <tl_templates/musa/reduce.h>\n";
   // decl_stream << "#include <tl_templates/musa/ldsm.h>\n";
   // decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";

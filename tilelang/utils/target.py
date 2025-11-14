@@ -5,7 +5,7 @@ from tilelang import tvm as tvm
 from tilelang import _ffi_api
 from tvm.target import Target
 from tvm.contrib import rocm
-from tilelang.contrib import nvcc
+from tilelang.contrib import nvcc, mcc
 
 SUPPORTED_TARGETS: dict[str, str] = {
     "auto": "Auto-detect CUDA/HIP/Metal based on availability.",
@@ -37,6 +37,19 @@ def check_cuda_availability() -> bool:
         return True
     except Exception:
         return False
+
+def check_musa_availability() -> bool:
+    """
+    Check if CUDA is available on the system by locating the CUDA path.
+    Returns:
+        bool: True if CUDA is available, False otherwise.
+    """
+    try:
+        mcc.find_musa_path()
+        return True
+    except Exception:
+        return False
+
 
 
 def check_hip_availability() -> bool:
@@ -87,10 +100,13 @@ def determine_target(target: str | Target | Literal["auto"] = "auto",
         # Check for CUDA and HIP availability
         is_cuda_available = check_cuda_availability()
         is_hip_available = check_hip_availability()
+        is_musa_available = check_musa_availability()
 
         # Determine the target based on availability
         if is_cuda_available:
             return_var = "cuda"
+        elif is_musa_available:
+            return_var = "musa"
         elif is_hip_available:
             return_var = "hip"
         elif check_metal_availability():
@@ -133,6 +149,11 @@ def target_is_musa(target: Target) -> bool:
 def target_is_hip(target: Target) -> bool:
     return _ffi_api.TargetIsRocm(target)
 
+def target_is_qy2(target: Target) -> bool:
+    return _ffi_api.TargetIsQY2(target)
+
+def target_is_ph1(target: Target) -> bool:
+    return _ffi_api.TargetIsPH1(target)
 
 def target_is_volta(target: Target) -> bool:
     return _ffi_api.TargetIsVolta(target)

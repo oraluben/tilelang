@@ -26,9 +26,30 @@ int GetArchInt(Target target) {
   ICHECK(s.has_value());
   const std::string arch_str = s.value();
   ICHECK(arch_str.size() >= 3);
-  ICHECK_EQ(arch_str.compare(0, 3, "sm_"), 0)
-      << "arch string must start with sm_";
+  if (TargetIsCuda(target)) {
+    ICHECK_EQ(arch_str.compare(0, 3, "sm_"), 0)
+          << "cuda's arch string must start with sm_";
+  } else if (TargetIsMusa(target)) {
+    ICHECK_EQ(arch_str.compare(0, 3, "mp_"), 0)
+          << "musa's arch string must start with mp_";
+  }
   return std::stoi(arch_str.substr(3));
+}
+
+bool TargetIsQY2(Target target) {
+  if (!TargetIsMusa(target)) {
+    return false;
+  }
+  int arch = GetArchInt(target);
+  return arch == 22;
+}
+
+bool TargetIsPH1(Target target) {
+  if (!TargetIsMusa(target)) {
+    return false;
+  }
+  int arch = GetArchInt(target);
+  return arch == 31;
 }
 
 bool TargetIsVolta(Target target) {
@@ -99,6 +120,9 @@ bool TargetHasAsyncCopy(Target target) {
     } else {
       return false;
     }
+  } else if (TargetIsMusa(target)) {
+    int arch = GetArchInt(target);
+    return arch >= 21;
   }
 
   return false;
@@ -132,8 +156,12 @@ bool TargetHasBulkCopy(Target target) {
 
 int TargetGetWarpSize(Target target) {
   int res = 32;
-  if (TargetIsCDNA(target))
+  if (TargetIsCDNA(target)) {
     res = 64;
+  }
+  if (TargetIsQY2(target)) {
+    res = 128;
+  }
   return res;
 }
 
