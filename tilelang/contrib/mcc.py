@@ -1,6 +1,6 @@
 # pylint: disable=invalid-name
-# modified from apache tvm python/tvm/contrib/nvcc.py
-"""Utility to invoke nvcc compiler in the system"""
+# modified from apache tvm python/tvm/contrib/mcc.py
+"""Utility to invoke mcc compiler in the system"""
 from __future__ import absolute_import as _abs
 from __future__ import annotations
 
@@ -19,12 +19,9 @@ from tvm.base import py_str
 from tvm.contrib import utils
 
 
-def compile_musa(code,
-                 target_format="ptx",
-                 arch=None,
-                 options=None,
-                 path_target=None,
-                 verbose=False):
+def compile_musa(
+    code, target_format="ptx", arch=None, options=None, path_target=None, verbose=False
+):
     """Compile musa code with MCC from env.
 
     Parameters
@@ -64,7 +61,7 @@ def compile_musa(code,
     temp_target = temp.relpath(f"{file_name}.{target_format}")
 
     pass_context = tvm.get_global_func("transform.GetCurrentPassContext")()
-    kernels_output_dir = (pass_context.config.get("musa.kernels_output_dir", None))
+    kernels_output_dir = pass_context.config.get("musa.kernels_output_dir", None)
     if kernels_output_dir is not None:
         if not os.path.isdir(kernels_output_dir):
             os.makedirs(kernels_output_dir)
@@ -95,10 +92,10 @@ def compile_musa(code,
     cmd += ["-o", file_target]
     cmd += [temp_code]
 
-    # NOTE: ccbin option can be used to tell nvcc where to find the c++ compiler
+    # NOTE: ccbin option can be used to tell mcc where to find the c++ compiler
     # just in case it is not in the path. On Windows it is not in the path by default.
     # However, we cannot use TVM_CXX_COMPILER_PATH because the runtime env.
-    # Because it is hard to do runtime compiler detection, we require nvcc is configured
+    # Because it is hard to do runtime compiler detection, we require mcc is configured
     # correctly by default.
     # if cxx_compiler_path != "":
     #    cmd += ["-ccbin", cxx_compiler_path]
@@ -111,10 +108,12 @@ def compile_musa(code,
         print(py_str(out))
 
     if proc.returncode != 0:
-        msg = f"{code}\n" \
-            f"Compilation error:\n" \
-            f"{py_str(out)}\n" \
+        msg = (
+            f"{code}\n"
+            f"Compilation error:\n"
+            f"{py_str(out)}\n"
             f"Command: {' '.join(cmd)}\n"
+        )
         raise RuntimeError(msg)
 
     with open(file_target, "rb") as f:
@@ -164,6 +163,7 @@ def default_compile_options(compile_flags: list[str] | None = None) -> list[str]
     # (e.g., multiple "-gencode" pairs or repeated "-Xcompiler" entries).
     if compile_flags:
         import shlex
+
         for flag in compile_flags:
             # Split each string like a shell would, preserving quoted args
             tokens = shlex.split(flag) if isinstance(flag, str) else [str(flag)]
@@ -221,7 +221,7 @@ def get_musa_version(musa_path=None):
 
 @tvm_ffi.register_global_func("tilelang_callback_musa_compile", override=True)
 def tilelang_callback_musa_compile(code, target):  # pylint: disable=unused-argument
-    """use nvcc to generate fatbin code for better optimization"""
+    """use mcc to generate fatbin code for better optimization"""
     ptx = compile_musa(code, target_format="fatbin")
     return ptx
 
@@ -321,8 +321,10 @@ def get_musa_compute_version(target=None):
     if tvm.musa(0).exist:
         return tvm.musa(0).compute_version
 
-    raise ValueError("No MUSA architecture was specified or GPU detected."
-                     "Try specifying it by adding '-arch=mp_xx' to your target.")
+    raise ValueError(
+        "No MUSA architecture was specified or GPU detected."
+        "Try specifying it by adding '-arch=mp_xx' to your target."
+    )
 
 
 def parse_musa_compute_version(compute_version) -> tuple[int, int]:
@@ -356,33 +358,28 @@ def get_musa_arch(compute_version) -> str:
     return target_arch
 
 
-# def have_fp16(compute_version):
-#     """Either fp16 support is provided in the compute capability or not
+def have_fp16(compute_version):
+    """Either fp16 support is provided in the compute capability or not
 
-#     Parameters
-#     ----------
-#     compute_version: str
-#         compute capability of a GPU (e.g. "6.0")
-#     """
-#     major, minor = parse_musa_compute_version(compute_version)
-#     # fp 16 support in reference to:
-#     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/#arithmetic-instructions
-#     conditions = [False]
-#     conditions.append(major == 5 and minor >= 3)
-#     conditions.append(major >= 6)
-#     return any(conditions)
+    Parameters
+    ----------
+    compute_version: str
+        compute capability of a GPU (e.g. "6.0")
+    """
+    major, _ = parse_musa_compute_version(compute_version)
+    major >= 2
 
 
-# def have_int8(compute_version):
-#     """Either int8 support is provided in the compute capability or not
+def have_int8(compute_version):
+    """Either int8 support is provided in the compute capability or not
 
-#     Parameters
-#     ----------
-#     compute_version : str
-#         compute capability of a GPU (e.g. "6.1")
-#     """
-#     major, _ = parse_musa_compute_version(compute_version)
-#     return major >= 6
+    Parameters
+    ----------
+    compute_version : str
+        compute capability of a GPU (e.g. "6.1")
+    """
+    major, _ = parse_musa_compute_version(compute_version)
+    return major >= 2
 
 
 # def have_tensorcore(compute_version=None, target=None):
@@ -424,53 +421,49 @@ def get_musa_arch(compute_version) -> str:
 #         return False
 
 
-# @tvm_ffi.register_global_func("tvm.contrib.nvcc.supports_bf16", override=True)
-# def have_bf16(compute_version):
-#     """Either bf16 support is provided in the compute capability or not
+@tvm_ffi.register_global_func("tvm.contrib.mcc.supports_bf16", override=True)
+def have_bf16(compute_version):
+    """Either bf16 support is provided in the compute capability or not
 
-#     Parameters
-#     ----------
-#     compute_version : str
-#         compute capability of a GPU (e.g. "8.0")
-#     """
-#     major, _ = parse_musa_compute_version(compute_version)
-#     return major >= 8
-
-
-# @tvm_ffi.register_global_func("tvm.contrib.nvcc.supports_fp8", override=True)
-# def have_fp8(compute_version):
-#     """Whether fp8 support is provided in the specified compute capability or not
-
-#     Parameters
-#     ----------
-#     compute_version : str
-#         GPU capability
-#     """
-#     major, minor = parse_musa_compute_version(compute_version)
-#     # fp8 is supported in Ada Lovelace (8.9) or later architectures.
-#     conditions = [False]
-#     conditions.append(major == 8 and minor >= 9)
-#     conditions.append(major >= 9)
-#     return any(conditions)
+    Parameters
+    ----------
+    compute_version : str
+        compute capability of a GPU (e.g. "8.0")
+    """
+    major, _ = parse_musa_compute_version(compute_version)
+    return major >= 2
 
 
-# @tvm_ffi.register_global_func("tvm.contrib.nvcc.supports_tma", override=True)
-# def have_tma(target):
-#     """Whether TMA support is provided in the specified compute capability or not
+@tvm_ffi.register_global_func("tvm.contrib.mcc.supports_fp8", override=True)
+def have_fp8(compute_version):
+    """Whether fp8 support is provided in the specified compute capability or not
 
-#     Parameters
-#     ----------
-#     target : tvm.target.Target
-#         The compilation target
-#     """
-#     if target.kind.name != "cuda":
-#         return False
-#     compute_version = get_musa_compute_version(target)
-#     major, minor = parse_musa_compute_version(compute_version)
-#     # TMA is supported in Ada Lovelace (9.0) or later architectures.
-#     conditions = [False]
-#     conditions.append(major >= 9)
-#     return any(conditions)
+    Parameters
+    ----------
+    compute_version : str
+        GPU capability
+    """
+    major, _ = parse_musa_compute_version(compute_version)
+    # fp8 is supported in S5000 or later architectures.
+    return major >= 3
+
+
+@tvm_ffi.register_global_func("tvm.contrib.mcc.supports_tma", override=True)
+def have_tma(target):
+    """Whether TMA support is provided in the specified compute capability or not
+
+    Parameters
+    ----------
+    target : tvm.target.Target
+        The compilation target
+    """
+    if target.kind.name != "musa":
+        return False
+    compute_version = get_musa_compute_version(target)
+    major, _ = parse_musa_compute_version(compute_version)
+    # TMA is supported in S5000 or later architectures.
+    return major >= 3
+
 
 def is_qy2(target):
     if target.kind.name != "musa":
@@ -479,6 +472,7 @@ def is_qy2(target):
     major, minor = parse_musa_compute_version(compute_version)
     return major == 2 and minor == 2
 
+
 def is_ph1(target):
     if target.kind.name != "musa":
         return False
@@ -486,6 +480,7 @@ def is_ph1(target):
     major, minor = parse_musa_compute_version(compute_version)
     return major == 3 and minor == 1
 
+
 def get_mcc_compiler() -> str:
-    """Get the path to the nvcc compiler"""
+    """Get the path to the mcc compiler"""
     return os.path.join(find_musa_path(), "bin", "mcc")
