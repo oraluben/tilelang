@@ -3,17 +3,23 @@ from tvm import tir, IRModule
 from tvm.target import Target
 import tilelang
 from tilelang.transform import PassContext
-from tilelang.contrib.nvcc import have_tma, is_hopper
+from tilelang.contrib import nvcc
+from tilelang.contrib import mcc
+
+def have_tma(target):
+    # avoid circular import
+    from tilelang.jit.adapter.utils import is_cuda_target, is_musa_target
+    conditions = [False]
+    conditions.append(is_cuda_target(target) and nvcc.have_tma(target))
+    conditions.append(is_musa_target(target) and mcc.have_tma(target))
+    return any(conditions)
 
 
 def allow_warp_specialized(pass_ctx: PassContext | None = None,
                            target: Target | None = None) -> bool:
-    # avoid circular import
-    from tilelang.jit.adapter.utils import is_cuda_target
-
     if pass_ctx is None:
         pass_ctx = tilelang.transform.get_pass_context()
-    if (not is_cuda_target(target)) or (not have_tma(target)):
+    if not have_tma(target):
         return False
     disable_warp_specialized = pass_ctx.config.get("tl.disable_warp_specialized", False)
     return not disable_warp_specialized
@@ -145,7 +151,7 @@ def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
         # so we need to lower the opaque block first
         mod = tilelang.transform.LowerOpaqueBlock()(mod)
         mod = tilelang.transform.MergeIfStmt()(mod)
-        if is_hopper(target):
+        if nvcc.is_hopper(target):
             mod = tilelang.transform.RewriteWgmmaSync()(mod)
         mod = tilelang.transform.InjectFenceProxy()(mod)
     else:
@@ -190,6 +196,8 @@ def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
     mod = tilelang.transform.LowerThreadAllreduce()(mod)
 
     mod = tilelang.transform.LowerHopperIntrin()(mod)
+    if mcc.is_ph1(target):
+        mod = tilelang.transform.LowerPHIntrin()(mod)
     # Global Barrier Synchronization must be applied before
     # SplitHostDevice pass, as the global barrier
     if allow_global_thread_synchronization():

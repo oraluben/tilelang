@@ -1,6 +1,7 @@
 # cython: language_level=3
 
 import torch
+import torch_musa
 cimport cython
 import ctypes
 from libc.stdint cimport int64_t, uintptr_t
@@ -181,6 +182,11 @@ cdef class CythonKernelWrapper:
                     stream = torch._C._cuda_getCurrentRawStream(torch.cuda.current_device())
                 except ImportError:
                     stream = torch.cuda.current_stream().cuda_stream
+            elif torch.musa.is_available():
+                try:
+                    stream = torch_musa._MUSAC._musa_getCurrentRawStream(torch.musa.current_device())
+                except ImportError:
+                    stream = torch.musa.current_stream().musa_stream
             else:
                 stream = 0
 

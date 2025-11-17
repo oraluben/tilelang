@@ -74,7 +74,7 @@ TMA_DESC_INIT_FUNC = """
 \tMUtensorMapL2promotion {0}_l2Promotion= (MUtensorMapL2promotion){10};
 \tMUtensorMapFloatOOBfill {0}_oobFill= (MUtensorMapFloatOOBfill){11};
 
-\tCUresult {0}_result = MUTLASS_MUSA_DRIVER_WRAPPER_CALL(muTensorMapEncodeTiled)(
+\tMUresult {0}_result = MUTLASS_MUSA_DRIVER_WRAPPER_CALL(muTensorMapEncodeTiled)(
     &{0}, {0}_type, {0}_tensorRank, {0}_globalAddress, {0}_globalDim, {0}_globalStride + 1, {0}_boxDim, {0}_elementStrides, {0}_interleave, {0}_swizzle, {0}_l2Promotion, {0}_oobFill);
 
 \tif ({0}_result != MUSA_SUCCESS) {{
@@ -102,7 +102,7 @@ TMA_IM2COL_DESC_INIT_FUNC = """
 \tMUtensorMapL2promotion {0}_l2Promotion= (MUtensorMapL2promotion){13};
 \tMUtensorMapFloatOOBfill {0}_oobFill= (MUtensorMapFloatOOBfill){14};
 
-\tCUresult {0}_result = MUTLASS_MUSA_DRIVER_WRAPPER_CALL(muTensorMapEncodeIm2col)(
+\tMUresult {0}_result = MUTLASS_MUSA_DRIVER_WRAPPER_CALL(muTensorMapEncodeIm2col)(
     &{0}, {0}_type, {0}_tensorRank, {0}_globalAddress, {0}_globalDim, {0}_globalStride + 1,
     {0}_lowerCorner, {0}_upperCorner, {0}_channelsPerPixel, {0}_pixelsPerColumn, {0}_elementStrides, {0}_interleave, {0}_swizzle, {0}_l2Promotion, {0}_oobFill);
 

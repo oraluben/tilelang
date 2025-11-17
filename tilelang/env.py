@@ -86,8 +86,8 @@ def _find_cuda_home() -> str:
 def _find_musa_home() -> str:
     """Find the MUSA install path."""
     # Guess #1
-    cuda_home = os.environ.get('MUSA_HOME') or os.environ.get('MUSA_PATH')
-    if cuda_home is None:
+    musa_home = os.environ.get('MUSA_HOME') or os.environ.get('MUSA_PATH')
+    if musa_home is None:
         # Guess #2
         mcc_path = shutil.which("mcc")
         if mcc_path is not None:

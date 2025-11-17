@@ -148,10 +148,14 @@ bool TargetHasTmem(Target target) {
 }
 
 bool TargetHasBulkCopy(Target target) {
-  if (!TargetIsCuda(target))
-    return false;
-  int arch = GetArchInt(target);
-  return arch >= 90;
+  if (TargetIsCuda(target)) {
+    int arch = GetArchInt(target);
+    return arch >= 90;
+  } else if (TargetIsMusa(target)) {
+    int arch = GetArchInt(target);
+    return arch >= 31;
+  }
+  return false;
 }
 
 int TargetGetWarpSize(Target target) {

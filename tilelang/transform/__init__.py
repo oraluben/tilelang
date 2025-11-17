@@ -114,6 +114,10 @@ def LowerHopperIntrin():
            )  # type: ignore
 
 
+def LowerPHIntrin():
+    return _ffi_api.LowerPHIntrin()
+
+
 def WarpSpecializedPipeline():
     """WarpSpecializedPipeline
 
