@@ -2,7 +2,6 @@
 
 #include "common.h"
 
-
 #define _AS1 __attribute__((address_space(1)))
 #define _AS3 __attribute__((address_space(3)))
 
@@ -22,8 +21,6 @@ TL_DEVICE void cp_async_gs(void const *const smem_addr, void *global_ptr) {
 
 template <int N>
 TL_DEVICE void cp_async_gs_conditional(void const *const smem_addr,
-                                       void *global_ptr, bool cond) {
-  }
-
+                                       void *global_ptr, bool cond) {}
 
 } // namespace tl
