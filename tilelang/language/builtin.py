@@ -581,6 +581,14 @@ def sync_threads(barrier_id: int = None, arrive_count: int = None):
         args.append(arrive_count)
     return tir.call_intrin("int32", "tir.tvm_storage_sync", "shared", *args)
 
+def musa_sync(barrier, thread_count):
+    """Synchronize threads via an mbarrier arrive + wait."""
+    return evaluate(
+        tir.call_intrin(
+            "handle", tir.op.Op.get("tl.musa_sync"), barrier, thread_count
+        )
+    )
+
 
 def sync_global():
     """Synchronize all threads in the entire grid.

@@ -172,6 +172,16 @@ def ThreadPartialSync(storage_scope: str):
     return _ffi_api.ThreadPartialSync(storage_scope)  # type: ignore
 
 
+def RewriteMUSAPartialSync():
+    """Rewrite 3-arg shared storage sync to mbarrier arrive+wait for MUSA."""
+    return _ffi_api.RewriteMUSAPartialSync()  # type: ignore
+
+
+def OffsetMbarrierId():
+    """Offset all get_mbarrier ids by +1."""
+    return _ffi_api.OffsetMbarrierId()  # type: ignore
+
+
 def IfStmtBinding():
     """IfStmtBinding
 

@@ -19,6 +19,7 @@
 #include "region.h"
 
 #include "../target/cuda.h"
+#include "../target/musa.h"
 #include "../target/utils.h"
 #include "builtin.h"
 #include <tvm/tir/builtin.h>
@@ -89,6 +90,75 @@ static int to_CUtensorMapDataType(DataType dtype) {
       break;
     case 8:
       tp = CU_TENSOR_MAP_DATA_TYPE_UINT8;
+      break;
+    default:
+      ICHECK(0) << dtype;
+    }
+  } else {
+    ICHECK(0) << dtype;
+  }
+  return static_cast<int>(tp);
+}
+
+
+/*!
+ * \brief Helper to map TVM's DataType to CUDA's CUtensorMapDataType enum value.
+ * This function converts TVM data types to CUDA tensor map data types for TMA
+ * operations.
+ */
+static int to_MUtensorDescriptorDataType(DataType dtype) {
+  MUtensorDescriptorDataType tp;
+  if (dtype.is_float()) {
+    switch (dtype.bits()) {
+    case 64:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_FLOAT64;
+      break;
+    case 32:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_FLOAT32;
+      break;
+    case 16:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_FLOAT16;
+      break;
+    case 8:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT8;
+      break;
+    default:
+      ICHECK(0) << dtype;
+    }
+  } else if (dtype.is_bfloat16()) {
+    tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_BFLOAT16;
+  } else if (dtype.is_float8_e4m3() || dtype.is_float8_e5m2()) {
+    tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT8;
+  } else if (dtype.is_int()) {
+    switch (dtype.bits()) {
+    case 64:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_INT64;
+      break;
+    case 32:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_INT32;
+      break;
+    case 16:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT16;
+      break;
+    case 8:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT8;
+      break;
+    default:
+      ICHECK(0) << dtype;
+    }
+  } else if (dtype.is_uint()) {
+    switch (dtype.bits()) {
+    case 64:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT64;
+      break;
+    case 32:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT32;
+      break;
+    case 16:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT16;
+      break;
+    case 8:
+      tp = MU_TENSOR_DESCRIPTOR_DATA_TYPE_UINT8;
       break;
     default:
       ICHECK(0) << dtype;
@@ -1373,7 +1443,9 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
       << shared_tensor->name << " with different data type "
       << global_tensor->dtype << " and " << shared_tensor->dtype;
 
-  desc.data_type = to_CUtensorMapDataType(global_tensor->dtype);
+  desc.data_type = TargetIsMusa(T.target)
+                       ? to_MUtensorDescriptorDataType(global_tensor->dtype)
+                       : to_CUtensorMapDataType(global_tensor->dtype);
 
   // Global Tensor Shape and Stride
   desc.global_addr = global_tensor->data;
@@ -1453,7 +1525,9 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
   // It determines how data is arranged in shared memory banks to minimize bank
   // conflicts Different swizzle patterns (32B, 64B, 128B) offer different
   // trade-offs between access efficiency and memory usage
-  desc.interleave = static_cast<int>(CU_TENSOR_MAP_INTERLEAVE_NONE);
+  desc.interleave = TargetIsMusa(T.target)
+                        ? static_cast<int>(MU_TENSOR_DESCRIPTOR_INTERLEAVE_NONE)
+                        : static_cast<int>(CU_TENSOR_MAP_INTERLEAVE_NONE);
   Layout shared_layout;
   if (T.layout_map.count(shared_tensor)) {
     shared_layout = T.layout_map.at(shared_tensor);
@@ -1795,7 +1869,9 @@ Stmt Conv2DIm2ColOpNode::Lower(const LowerArgs &T,
 
   TMAIm2ColDesc desc;
   desc.rank = src->shape.size();
-  desc.data_type = to_CUtensorMapDataType(src->dtype);
+  desc.data_type = TargetIsMusa(T.target)
+                       ? to_MUtensorDescriptorDataType(src->dtype)
+                       : to_CUtensorMapDataType(src->dtype);
   desc.global_addr = src->data;
   desc.global_shape = ReverseArray(src->shape);
 
@@ -1823,7 +1899,9 @@ Stmt Conv2DIm2ColOpNode::Lower(const LowerArgs &T,
   desc.smem_box_channel = Downcast<IntImm>(dst->shape[1])->value;
   desc.l2_promotion = static_cast<int>(CU_TENSOR_MAP_L2_PROMOTION_L2_128B);
   desc.oob_fill = static_cast<int>(CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
-  desc.interleave = static_cast<int>(CU_TENSOR_MAP_INTERLEAVE_NONE);
+  desc.interleave = TargetIsMusa(T.target)
+                        ? static_cast<int>(MU_TENSOR_DESCRIPTOR_INTERLEAVE_NONE)
+                        : static_cast<int>(CU_TENSOR_MAP_INTERLEAVE_NONE);
   if (!shared_layout.defined()) {
     desc.swizzle = static_cast<int>(CU_TENSOR_MAP_SWIZZLE_NONE);
   } else {

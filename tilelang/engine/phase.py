@@ -35,8 +35,14 @@ def allow_tma_and_warp_specialized(pass_ctx: PassContext | None = None,
     return not disable_tma_lower and allow_warp_specialized(pass_ctx=pass_ctx, target=target)
 
 
+def allow_warp_group_reg_alloc(pass_ctx: PassContext, target: Target):
+    from tilelang.jit.adapter.utils import is_musa_target
+    return allow_tma_and_warp_specialized(pass_ctx, target) and not is_musa_target(target)
+
+
 def allow_fence_proxy(target: Target | None = None) -> bool:
-    return have_tma(target)
+    from tilelang.jit.adapter.utils import is_musa_target
+    return have_tma(target) and not is_musa_target(target)
 
 
 def allow_vectorize(pass_ctx: PassContext | None = None) -> bool:
@@ -132,6 +138,8 @@ def LowerAndLegalize(mod: IRModule, target: Target) -> IRModule:
 
 
 def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
+    from tilelang.jit.adapter.utils import is_musa_target
+
     pass_ctx = tilelang.transform.get_pass_context()
     # Lower the barrier.arrive into specific initialization slot
     mod = tilelang.transform.LowerSharedBarrier()(mod)
@@ -153,17 +161,17 @@ def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
         mod = tilelang.transform.MergeIfStmt()(mod)
         if nvcc.is_hopper(target):
             mod = tilelang.transform.RewriteWgmmaSync()(mod)
-        mod = tilelang.transform.InjectFenceProxy()(mod)
     else:
         mod = tilelang.transform.IfStmtBinding()(mod)
         mod = tir.transform.PlanAndUpdateBufferAllocationLocation()(mod)
         mod = tilelang.transform.PipelinePlanning()(mod)
         mod = tilelang.transform.InjectSoftwarePipeline()(mod)
         mod = tilelang.transform.MergeIfStmt()(mod)
-        if allow_fence_proxy(target=target):
-            # in hopper device, wgmma is an async proxy
-            # so we need to inject a fence proxy before it
-            mod = tilelang.transform.InjectFenceProxy()(mod)
+
+    if allow_fence_proxy(target=target):
+        # in hopper device, wgmma is an async proxy
+        # so we need to inject a fence proxy before it
+        mod = tilelang.transform.InjectFenceProxy()(mod)
 
     mod = tilelang.transform.LowerOpaqueBlock()(mod)
     mod = tir.transform.NarrowDataType(32)(mod)
@@ -212,10 +220,13 @@ def OptimizeForTarget(mod: IRModule, target: Target) -> IRModule:
             mod)
     mod = tilelang.transform.ThreadSync("shared")(mod)
     mod = tilelang.transform.ThreadSync("shared.dyn")(mod)
+    if is_musa_target(target):
+        mod = tilelang.transform.RewriteMUSAPartialSync()(mod)
+        mod = tilelang.transform.OffsetMbarrierId()(mod)
     # Inject PTX async copy must behind the thread sync pass
     # as ptx async copy won't be recognized as a valid buffer load
     mod = tilelang.transform.InjectPTXAsyncCopy()(mod)
-    if allow_tma_and_warp_specialized(pass_ctx=pass_ctx, target=target):
+    if allow_warp_group_reg_alloc(pass_ctx, target):
         mod = tilelang.transform.AnnotateWarpGroupRegAlloc()(mod)
     mod = tilelang.transform.MakePackedAPI()(mod)
     mod = tilelang.transform.LowerDeviceKernelLaunch()(mod)
