@@ -4,6 +4,7 @@
  */
 
 #include "warp_specialized_rewriter.h"
+#include <tvm/target/target.h>
 
 namespace tvm {
 namespace tl {
@@ -1115,11 +1116,14 @@ private:
 class WarpSpecializedRewriter : public StmtExprMutator {
 public:
   WarpSpecializedRewriter(bool disable_warp_specialized,
-                          bool disable_shuffle_elect)
+                          bool disable_shuffle_elect,
+                          bool force_full_producer_arrive)
       : disable_warp_specialized_(disable_warp_specialized),
-        disable_shuffle_elect_(disable_shuffle_elect) {}
+        disable_shuffle_elect_(disable_shuffle_elect),
+        force_full_producer_arrive_(force_full_producer_arrive) {}
   static PrimFunc Substitute(PrimFunc f, bool disable_warp_specialized,
-                             bool disable_shuffle_elect) {
+                             bool disable_shuffle_elect,
+                             bool force_full_producer_arrive) {
     // Check if function only uses threadIdx.x before proceeding
     if (!ThreadTagChecker::HasOnlyThreadIdxX(f)) {
       LOG(WARNING) << "WarpSpecialize will be disabled because the program "
@@ -1131,7 +1135,8 @@ public:
     }
 
     auto T = WarpSpecializedRewriter(disable_warp_specialized,
-                                     disable_shuffle_elect);
+                                     disable_shuffle_elect,
+                                     force_full_producer_arrive);
     T.buffer_lca_ = DetectBufferAccessLCA(f);
     for (auto [buffer, _] : T.buffer_lca_)
       T.buffer_data_to_buffer_.Set(buffer->data, buffer);
@@ -1237,10 +1242,17 @@ private:
     Array<PrimExpr> barrier_num_threads;
     barrier_num_threads.reserve(num_barriers);
     for (int i = 0; i < num_barriers; i++) {
-      PrimExpr arrive_thread_count =
-          producer.released_barrier_.count(i)
-              ? (producer.hasSimtCopy() ? producer_thread_extent : 1)
-              : consumer_thread_extent;
+      PrimExpr arrive_thread_count;
+      if (producer.released_barrier_.count(i)) {
+        if (!producer.hasSimtCopy() && force_full_producer_arrive_) {
+          arrive_thread_count = producer_thread_extent;
+        } else {
+          arrive_thread_count =
+              producer.hasSimtCopy() ? producer_thread_extent : 1;
+        }
+      } else {
+        arrive_thread_count = consumer_thread_extent;
+      }
       barrier_num_threads.push_back(arrive_thread_count);
     }
 
@@ -1268,6 +1280,7 @@ private:
   bool need_update_thread_extent_ = false;
   bool disable_warp_specialized_ = false;
   bool disable_shuffle_elect_ = false;
+  bool force_full_producer_arrive_{false};
 };
 
 using namespace tir::transform;
@@ -1281,8 +1294,13 @@ tvm::transform::Pass WarpSpecialized() {
     bool warp_specialized = WarpSpecializedDetector::Detect(f->body);
 
     if (!warp_specialized) {
-      return WarpSpecializedRewriter::Substitute(f, disable_warp_specialized,
-                                                 disable_shuffle_elect);
+      bool force_full_producer_arrive = false;
+      if (auto target = f->GetAttr<tvm::Target>(tvm::attr::kTarget)) {
+        force_full_producer_arrive = target.value()->kind->name == "musa";
+      }
+      return WarpSpecializedRewriter::Substitute(
+          f, disable_warp_specialized, disable_shuffle_elect,
+          force_full_producer_arrive);
     } else {
       auto node = ffi::String("default");
       f.CopyOnWrite()->body =

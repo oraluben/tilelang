@@ -185,6 +185,13 @@ TVM_DLL const Op &get_mbarrier();
 TVM_DLL const Op &tma_load();
 
 /*!
+ * \brief Synchronize using MUSA mbarrier arrive+wait.
+ *
+ * musa_sync(barrier, thread_count)
+ */
+TVM_DLL const Op &musa_sync();
+
+/*!
  * \brief tvm intrinsics for loading image from global tensor to columns in
  * shared memory
  *

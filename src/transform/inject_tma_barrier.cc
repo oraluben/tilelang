@@ -31,6 +31,7 @@
 #include <tvm/tir/stmt.h>
 #include <tvm/tir/stmt_functor.h>
 #include <tvm/tir/transform.h>
+#include <tvm/target/target.h>
 
 #include <utility>
 
@@ -401,17 +402,23 @@ public:
   TmaBarrierRewriter(arith::Analyzer *analyzer,
                      Map<ObjectRef, PrimExpr> tma_op_to_barrier_id,
                      Map<PrimExpr, IntImm> barrier_id_to_range,
-                     bool has_create_list_of_mbarrier)
+                     bool has_create_list_of_mbarrier,
+                     bool force_split_arrive)
       : IRMutatorWithAnalyzer(analyzer),
         tma_op_to_barrier_id_(std::move(tma_op_to_barrier_id)),
         barrier_id_to_range_(std::move(barrier_id_to_range)),
-        has_create_list_of_mbarrier_(has_create_list_of_mbarrier) {}
+        has_create_list_of_mbarrier_(has_create_list_of_mbarrier),
+        force_split_arrive_(force_split_arrive) {}
 
   static PrimFunc Rewrite(PrimFunc f, arith::Analyzer *analyzer) {
     auto buffer_lca = DetectBufferAccessLCA(f);
     Map<Var, Buffer> buffer_data_to_buffer_;
     for (auto [buffer, _] : buffer_lca)
       buffer_data_to_buffer_.Set(buffer->data, buffer);
+    bool force_split_arrive = false;
+    if (auto target = f->GetAttr<tvm::Target>(tvm::attr::kTarget)) {
+      force_split_arrive = target.value()->kind->name == "musa";
+    }
     f = TmaExpectTxRewriter::Rewrite(f, analyzer);
     TmaBarrierCollector collector(buffer_data_to_buffer_);
     collector(f->body);
@@ -427,7 +434,8 @@ public:
     });
     TmaBarrierRewriter rewriter(analyzer, collector.tma_op_to_barrier_id(),
                                 collector.barrier_id_to_range(),
-                                has_create_list_of_mbarrier);
+                                has_create_list_of_mbarrier,
+                                force_split_arrive);
     f.CopyOnWrite()->body = rewriter(f->body);
     // Compute the minimum number of barriers actually referenced in the body
     // after TMA barrier rewrites (e.g., get_mbarrier(0) inserted for TMA).
@@ -451,9 +459,11 @@ public:
 
     // For simple TMA-only producers, default barrier arrive count should be 1
     // (only the elected leader performs the TMA arrive/expect).
+    PrimExpr default_thread_count =
+        force_split_arrive ? rewriter.producer_thread_extent_ : Integer(1);
     auto barrier_creation_rewriter = BarrierCreationRewriter(
         rewriter.restore_barrier_ids_, rewriter.producer_thread_extent_,
-        ensure_min_count, Integer(1));
+        ensure_min_count, default_thread_count);
     f.CopyOnWrite()->body = barrier_creation_rewriter(f->body);
     return f;
   }
@@ -546,6 +556,10 @@ private:
       auto barrier_id = tma_op_to_barrier_id_[call_ref];
       auto new_args = op->args;
       new_args.Set(0, barrier_id);
+      if (force_split_arrive_) {
+        clear_arrive_ = false;
+        return Call(op->dtype, op->op, new_args);
+      }
       if (!has_warp_specialization_)
         clear_arrive_ = false;
       else
@@ -556,6 +570,11 @@ private:
       }
       return Call(op->dtype, op->op, new_args);
     } else if (op->op.same_as(builtin::ptx_arrive_barrier())) {
+      if (force_split_arrive_) {
+        clear_arrive_ = false;
+        auto new_args = op->args;
+        return Call(op->dtype, op->op, new_args);
+      }
       if (clear_arrive_) {
         clear_arrive_ = false;
         return 0;
@@ -575,7 +594,8 @@ private:
   int tma_expect_tx_{0}, cur_expect_idx_{0};
   std::vector<bool> clear_expect_list_;
   std::vector<int> restore_barrier_ids_;
-  PrimExpr producer_thread_extent_;
+  PrimExpr producer_thread_extent_{Integer(1)};
+  bool force_split_arrive_{false};
 };
 
 tvm::transform::Pass InjectTmaBarrier() {

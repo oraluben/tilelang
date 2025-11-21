@@ -60,22 +60,26 @@ L2_PERSISTENT_MAP_RESET_HANDLE = """
 \tmusaDeviceSetLimit(musaLimitPersistingL2CacheSize, init_persisting_l2_cache_size);
 """
 
+# 0: name, eg. A_desc, B_desc ...
+# 1: date type
+# 2: tensor rank
+# 3: global address
+# 4: dim
+# 5: stride
+# 6: box dim
+# 7: element stride
 TMA_DESC_INIT_FUNC = """
-\tMUtensorMap {0};
-\tMUtensorMapDataType {0}_type= (MUtensorMapDataType){1};
+\tMUtensorDescriptor {0};
+\tMUtensorDescriptorDataType {0}_type= (MUtensorDescriptorDataType){1};
 \tmuuint32_t {0}_tensorRank= {2};
 \tvoid *{0}_globalAddress= {3};
 \tmuuint64_t {0}_globalDim[{2}]= {{{4}}};
 \tmuuint64_t {0}_globalStride[{2}]= {{{5}}};
-\tmuuint32_t {0}_boxDim[{2}]= {{{6}}};
-\tmuuint32_t {0}_elementStrides[{2}]= {{{7}}};
-\tMUtensorMapInterleave {0}_interleave= (MUtensorMapInterleave){8};
-\tMUtensorMapSwizzle {0}_swizzle= (MUtensorMapSwizzle){9};
-\tMUtensorMapL2promotion {0}_l2Promotion= (MUtensorMapL2promotion){10};
-\tMUtensorMapFloatOOBfill {0}_oobFill= (MUtensorMapFloatOOBfill){11};
+\tMUtensorDescriptorInterleave {0}_interleave= (MUtensorDescriptorInterleave){8};
+\tmuuint32_t {0}_oobFill= {11};
 
-\tMUresult {0}_result = MUTLASS_MUSA_DRIVER_WRAPPER_CALL(muTensorMapEncodeTiled)(
-    &{0}, {0}_type, {0}_tensorRank, {0}_globalAddress, {0}_globalDim, {0}_globalStride + 1, {0}_boxDim, {0}_elementStrides, {0}_interleave, {0}_swizzle, {0}_l2Promotion, {0}_oobFill);
+\tMUresult {0}_result = muTensorDescriptorEncode(
+    &{0}, {0}_type, {0}_tensorRank, {0}_globalAddress, {0}_globalDim, {0}_globalStride + 1, {0}_interleave, {0}_oobFill);
 
 \tif ({0}_result != MUSA_SUCCESS) {{
 \t\tstd::stringstream ss;
@@ -222,7 +226,7 @@ class TLMUSASourceWrapper:
                     desc_decls.append(matches[i - 1])
                 if i < len(matches) - 1:
                     desc_decls.append(matches[i + 1])
-                return any([decl == "MUtensorMap" for decl in desc_decls])
+                return any([decl == "MUtensorDescriptor" for decl in desc_decls])
 
             pattern = r"[,\s]*(?:\w+\s*\*+\s*__restrict__\s+)?(\w+)"
             matches = re.findall(pattern, s)

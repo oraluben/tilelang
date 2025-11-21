@@ -46,17 +46,17 @@ public:
   std::string CastFromTo(std::string value, DataType from,
                          DataType target) final;
   // overload visitor
-  void VisitExpr_(const RampNode *op, std::ostream &os) final;      // NOLINT(*)
-  void VisitExpr_(const BroadcastNode *op, std::ostream &os) final; // NOLINT(*)
-  void VisitExpr_(const FloatImmNode *op, std::ostream &os) final;
-  void VisitExpr_(const CallNode *op, std::ostream &os) final;
-  void VisitExpr_(const CastNode *op, std::ostream &os) final;
-  void VisitExpr_(const MinNode *op, std::ostream &os) final;
-  void VisitExpr_(const MaxNode *op, std::ostream &os) final;
-  void VisitStmt_(const EvaluateNode *op) final;
-  void VisitStmt_(const AllocateNode *op) final;
-  void VisitStmt_(const AttrStmtNode *op) final;
-  void VisitExpr_(const BufferLoadNode *op, std::ostream &os) final;
+  void VisitExpr_(const RampNode *op, std::ostream &os);      // NOLINT(*)
+  void VisitExpr_(const BroadcastNode *op, std::ostream &os); // NOLINT(*)
+  void VisitExpr_(const FloatImmNode *op, std::ostream &os);
+  void VisitExpr_(const CallNode *op, std::ostream &os);
+  void VisitExpr_(const CastNode *op, std::ostream &os);
+  void VisitExpr_(const MinNode *op, std::ostream &os);
+  void VisitExpr_(const MaxNode *op, std::ostream &os);
+  void VisitStmt_(const EvaluateNode *op);
+  void VisitStmt_(const AllocateNode *op);
+  void VisitStmt_(const AttrStmtNode *op);
+  void VisitExpr_(const BufferLoadNode *op, std::ostream &os);
 
   // Override this as a work around for __grid_constant__ parameter
   void AddFunction(const GlobalVar &gvar, const PrimFunc &f);

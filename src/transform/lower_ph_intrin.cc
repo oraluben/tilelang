@@ -94,9 +94,11 @@ public:
             // with an appropriate sync instruction with the right scope to
             // ensure visibility eg. __syncthreads() or a cluster_arrive() +
             // cluster_wait()
-            Stmt mem_fence = Evaluate(Call(
-                DataType::Handle(), tvm::tl::ptx_fence_barrier_init(), {}));
-            stmt_seq.push_back(mem_fence);
+
+            // Stmt mem_fence = Evaluate(Call(
+            //     DataType::Handle(), tvm::tl::ptx_fence_barrier_init(), {}));
+            // stmt_seq.push_back(mem_fence);
+
             Stmt mem_sync =
                 Evaluate(Call(DataType::Handle(), builtin::tvm_storage_sync(),
                               {StringImm("shared")}));
@@ -125,9 +127,9 @@ public:
         var = Var(name + "_desc",
                   PointerType(PrimType(cuTensorMapType()), "grid_constant"));
         desc_map_[tvm::ffi::GetRef<Call>(call)] = var;
-        prefetch_calls_.push_back(
-            Evaluate(Call(DataType::Handle(), builtin::call_extern(),
-                          {StringImm("tl::prefetch_tma_descriptor"), var})));
+        // prefetch_calls_.push_back(
+        //     Evaluate(Call(DataType::Handle(), builtin::call_extern(),
+        //                   {StringImm("tl::prefetch_tma_descriptor"), var})));
       }
       return var;
     } else if (call->op.same_as(create_list_of_mbarrier())) {

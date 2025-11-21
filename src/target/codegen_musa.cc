@@ -16,6 +16,7 @@
 #include "../op/builtin.h"
 #include "./ptx.h"
 #include "arith/pattern_match.h"
+#include "tvm/node/cast.h"
 
 namespace tvm {
 namespace codegen {
@@ -259,6 +260,7 @@ void CodeGenTileLangMUSA::PrintExtraAttrs(const PrimFunc &f) {
 std::string CodeGenTileLangMUSA::Finish() {
 
   decl_stream << "#include <tl_templates/musa/common.h>\n";
+  decl_stream << "#include <tl_templates/musa/intrin.h>\n";
 
   // if (need_mma_h_) {
   //   decl_stream << "#include <mma.h>\n";
@@ -295,6 +297,7 @@ std::string CodeGenTileLangMUSA::Finish() {
   //   decl_stream << "#include <tl_templates/musa/gemm_sp.h>\n";
   // }
   decl_stream << "#include <tl_templates/musa/copy.h>\n";
+  decl_stream << "#include <tl_templates/musa/barrier.h>\n";
   // decl_stream << "#include <tl_templates/musa/reduce.h>\n";
   // decl_stream << "#include <tl_templates/musa/ldsm.h>\n";
   // decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";
@@ -350,7 +353,7 @@ void CodeGenTileLangMUSA::PrintType(DataType t, std::ostream &os) { // NOLINT(*)
   }
 
   if (t == tl::cuTensorMapType()) {
-    os << "MUtensorMap";
+    os << "MUtensorDescriptor";
     return;
   }
 
@@ -1415,18 +1418,8 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
     this->stream << ss.str();
     this->stream << ");\n";
   };
-  auto print_mbarrier_obj = [&](PrimExpr barrier_id) {
-    std::ostringstream ss;
-    if (barrier_id.as<IntImmNode>()) {
-      // incase the barrier_id is an integer, we need to print the barrier_id as
-      // an integer
-      ss << mbarrier_name_ << "[" << barrier_id << "]";
-    } else {
-      // otherwise may be a T.get_mbarrier() call or BufferLoad Node
-      // we need to print the barrier_id as a string
-      ss << this->PrintExpr(barrier_id);
-    }
-    return ss.str();
+  auto print_mbarrier_id = [&](PrimExpr barrier_id) {
+    return this->PrintExpr(barrier_id);
   };
   if (op->op.same_as(builtin::ptx_cp_async())) {
     std::string dst = this->PrintExpr(op->args[0]);
@@ -1454,29 +1447,24 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
     std::string func_name = "tl::cp_async_wait<" + std::to_string(n) + ">";
     print_extern_call_stmt(func_name, 1);
   } else if (op->op.same_as(builtin::create_barriers())) {
-    this->PrintIndent();
     int barrier_count = Downcast<IntImm>(op->args[0])->value;
-    auto mbarrier_storage_name = mbarrier_name_ + "_mem";
-    this->stream << "__shared__ uint64_t " << mbarrier_storage_name << "["
-                 << barrier_count << "];\n";
     this->PrintIndent();
-    this->stream << "auto " << mbarrier_name_ << " = reinterpret_cast<"
-                 << mbarrier_dtype_ << "*>(" << mbarrier_storage_name << ");\n";
+    this->stream << "__musa_async_bar_record(" << barrier_count << ");\n";
   } else if (op->op.same_as(tl::get_mbarrier())) {
     ICHECK_EQ(op->args.size(), 1);
     std::string barrier_id = this->PrintExpr(op->args[0]);
-    os << mbarrier_name_ + "[" + barrier_id + "]";
+    os << barrier_id;
   } else if (op->op.same_as(builtin::ptx_arrive_barrier())) {
     if (op->args.size() == 1) {
       this->PrintIndent();
-      auto mbarrier_obj = print_mbarrier_obj(op->args[0]);
-      this->stream << mbarrier_obj << ".arrive();\n";
+      auto mbarrier_id = print_mbarrier_id(op->args[0]);
+      this->stream << "__musa_async_arrive(" << mbarrier_id << ");\n";
     } else if (op->args.size() == 3) {
       this->PrintIndent();
-      auto mbarrier_obj = print_mbarrier_obj(op->args[0]);
+      auto mbarrier_id = print_mbarrier_id(op->args[0]);
       auto cta_id = this->PrintExpr(op->args[1]);
       auto pred = this->PrintExpr(op->args[2]);
-      this->stream << mbarrier_obj << ".arrive(" << cta_id << ", " << pred
+      this->stream << mbarrier_id << ".arrive(" << cta_id << ", " << pred
                    << ");\n";
     } else {
       LOG(FATAL) << "Invalid parameter  for tl::arrive_barrier "
@@ -1485,23 +1473,33 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
   } else if (op->op.same_as(builtin::ptx_init_barrier_thread_count())) {
     ICHECK_EQ(op->args.size(), 2);
     this->PrintIndent();
-    auto mbarrier_obj = print_mbarrier_obj(op->args[0]);
+    auto mbarrier_id = print_mbarrier_id(op->args[0]);
     auto arrive_count = this->PrintExpr(op->args[1]);
-    this->stream << mbarrier_obj << ".init(" << arrive_count << ");\n";
+    auto warp_count = "((" + arrive_count + " + 31) / 32)";
+    this->stream << "__musa_async_init_arrival(" << mbarrier_id << ", " << warp_count
+                 << ", 0);\n";
+  } else if (op->op.same_as(tl::musa_sync())) {
+    ICHECK_EQ(op->args.size(), 2);
+    this->PrintIndent();
+    auto mbarrier_id = print_mbarrier_id(op->args[0]);
+    this->stream << "__musa_async_arrive(" << mbarrier_id << ");\n";
+    this->PrintIndent();
+    this->stream << "__musa_async_wait(" << mbarrier_id << ", 0);\n";
   } else if (op->op.same_as(builtin::ptx_arrive_barrier_expect_tx())) {
     if (op->args.size() == 2) {
-      this->PrintIndent();
-      auto mbarrier_obj = print_mbarrier_obj(op->args[0]);
+      auto mbarrier_id = print_mbarrier_id(op->args[0]);
       auto transaction_bytes = this->PrintExpr(op->args[1]);
-      this->stream << mbarrier_obj << ".arrive_and_expect_tx("
-                   << transaction_bytes << ");\n";
+      this->PrintIndent();
+      this->stream << "__musa_async_add_trans(" << mbarrier_id << ", " << transaction_bytes << ");\n";
+      this->PrintIndent();
+      this->stream << "__musa_async_arrive(" << mbarrier_id << ");\n";
     } else if (op->args.size() == 4) {
       this->PrintIndent();
-      auto mbarrier_obj = print_mbarrier_obj(op->args[0]);
+      auto mbarrier_id = print_mbarrier_id(op->args[0]);
       auto transaction_bytes = this->PrintExpr(op->args[1]);
       auto cta_id = this->PrintExpr(op->args[2]);
       auto pred = this->PrintExpr(op->args[3]);
-      this->stream << mbarrier_obj << ".arrive_and_expect_tx("
+      this->stream << mbarrier_id << ".arrive_and_expect_tx("
                    << transaction_bytes << ", " << cta_id << ", " << pred
                    << ");\n";
     } else {
@@ -1517,16 +1515,15 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
   } else if (op->op.same_as(tl::mbarrier_expect_tx())) {
     ICHECK_EQ(op->args.size(), 2);
     this->PrintIndent();
-    auto mbarrier_obj = print_mbarrier_obj(op->args[0]);
+    auto mbarrier_id = print_mbarrier_id(op->args[0]);
     auto transaction_bytes = this->PrintExpr(op->args[1]);
-    this->stream << mbarrier_obj << ".expect_transaction(" << transaction_bytes
-                 << ");\n";
+    this->stream << "__musa_async_add_trans(" << mbarrier_id << ", " << transaction_bytes << ");\n";
   } else if (op->op.same_as(tl::mbarrier_wait_parity())) {
     ICHECK_EQ(op->args.size(), 2);
     this->PrintIndent();
-    auto mbarrier_obj = print_mbarrier_obj(op->args[0]);
+    auto mbarrier_id = print_mbarrier_id(op->args[0]);
     auto phase = this->PrintExpr(op->args[1]);
-    this->stream << mbarrier_obj << ".wait(" << phase << ");\n";
+    this->stream << "__musa_async_wait(" << mbarrier_id << ", " << phase << ");\n";
   } else if (op->op.same_as(tl::ptx_init_tensor_memory())) {
     print_extern_call_stmt("tl::tmem_allocate");
   } else if (op->op.same_as(tl::ptx_deallocate_tensor_memory())) {
@@ -1547,12 +1544,15 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
     }
     auto desc = op->args[0];
     ss << this->PrintExpr(desc) << ", ";
-    ss << print_mbarrier_obj(op->args[1]) << ", ";
-    for (size_t i = 2; i < op->args.size() - 1; i++) {
-      if (i > 2)
+    ss << print_mbarrier_id(op->args[1]) << ", ";
+    auto smem = op->args[2];
+    ss << this->PrintExpr(smem) << ", ";
+    for (size_t i = 3; i < op->args.size() - 1; i++) {
+      if (i > 3)
         ss << ", ";
       ss << this->PrintExpr(op->args[i]);
     }
+    ss << ",128, 128"; // to fix
     ss << ");\n";
     this->PrintIndent();
     this->stream << ss.str();
@@ -1578,11 +1578,23 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
         this->eviction_policy_names_
             [op->args[op->args.size() - 1].as<IntImmNode>()->value];
     if (eviction_policy != "EVICT_NORMAL") {
-      ss << "tl::tma_store<tl::CacheHintSm90::" << eviction_policy << ">";
+      ss << "tl::tma_store<tl::CacheHintSm90::" << eviction_policy << ">(";
     } else {
-      ss << "tl::tma_store";
+      ss << "tl::tma_store(";
     }
-    print_extern_call_stmt(ss.str(), 0, 2);
+    auto desc = op->args[0];
+    ss << this->PrintExpr(desc) << ", ";
+    auto smem = op->args[1];
+    ss << this->PrintExpr(smem) << ", ";
+    for (size_t i = 2; i < op->args.size() - 2; i++) {
+      if (i > 2)
+        ss << ", ";
+      ss << this->PrintExpr(op->args[i]);
+    }
+    ss << ",128, 128"; // to fix
+    ss << ");\n";
+    this->PrintIndent();
+    this->stream << ss.str();
   } else if (op->op.same_as(tl::ptx_ldmatrix())) {
     int trans = Downcast<IntImm>(op->args[0])->value;
     int num = Downcast<IntImm>(op->args[1])->value;
@@ -3225,7 +3237,7 @@ void CodeGenTileLangMUSA::PrintFunctionSignature(const String &function_name,
       // work around for grid constant parameters.
       if (auto *ptr = v->type_annotation.as<PointerTypeNode>()) {
         if (ptr->storage_scope == "grid_constant") {
-          os << "__grid_constant__ const ";
+          os << "__attribute__((grid_constant)) const ";
           CodeGenC::PrintType(ptr->element_type, os);
           os << ' ' << vid;
           continue;
@@ -3296,7 +3308,7 @@ void CodeGenTileLangMUSA::AddFunction(const GlobalVar &gvar,
       // work around for grid constant parameters.
       if (auto *ptr = v->type_annotation.as<PointerTypeNode>()) {
         if (ptr->storage_scope == "grid_constant") {
-          stream << "__grid_constant__ const ";
+          stream << "__attribute__((grid_constant)) const ";
           CodeGenC::PrintType(ptr->element_type, stream);
           stream << ' ' << vid;
           continue;

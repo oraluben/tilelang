@@ -2,8 +2,10 @@
 
 #include "common.h"
 
-#define _AS1 __attribute__((address_space(1)))
-#define _AS3 __attribute__((address_space(3)))
+// #if defined(__MUSA_ARCH__) && (__MUSA_ARCH__ >= 310)
+#include "copy_mp31.h"
+// #endif
+
 
 namespace tl {
 

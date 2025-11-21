@@ -546,6 +546,23 @@ def tvm_storage_sync(storage_scope):
     """
     return _tvm_op.tvm_storage_sync(storage_scope)
 
+def musa_sync(barrier, thread_count):
+    """Synchronize threads via mbarrier arrive + wait.
+
+    Parameters
+    ----------
+    barrier : PrimExpr
+        The barrier handle.
+    thread_count : PrimExpr
+        Expected participating threads for initialization.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return _tvm_op.musa_sync(barrier, thread_count)
+
 
 def tvm_warp_shuffle(mask, value, warp_id, width, warp_size):
     """Exchange value between threads inside a warp.
