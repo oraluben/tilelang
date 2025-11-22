@@ -59,6 +59,10 @@ class LibraryGenerator:
             lib_path = self.libpath
         else:
             self.libpath = lib_path
+        replace_lib = os.environ.get("TILELANG_REPLACE_LIB")
+        if (replace_lib and os.path.isfile(replace_lib)):
+            lib_path = replace_lib
+        print(lib_path)
         return ctypes.CDLL(lib_path)
 
     def compile_lib(self, timeout: float = None):
