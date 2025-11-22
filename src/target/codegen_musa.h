@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #include "target/source/codegen_c.h"
+#include "tvm/ffi/string.h"
 
 namespace tvm {
 namespace codegen {
@@ -125,6 +126,8 @@ private:
   // Op attribute map
   OpAttrMap<bool> op_need_warp_shuffle_ =
       Op::GetAttrMap<bool>("musa.need_warp_shuffle");
+  // Map descriptor var to encoded TMA args for tile shape lookup
+  std::unordered_map<ffi::String, ffi::Array<PrimExpr>> tma_descriptor_args_;
 
   // The name of the barrier array in shared memory
   const std::string barrier_name_ = "barrier";
@@ -151,6 +154,8 @@ private:
       "EVICT_NORMAL", "EVICT_FIRST", "EVICT_LAST"};
   std::unordered_set<std::string> bf16_supported_ops_ = {
       "bf1622float2", "bf1622int16", "float22bf162", "bf162bf162"};
+
+  std::vector<PrimExpr> GetTMASmemBox(const PrimExpr &desc) const;
 };
 
 } // namespace codegen

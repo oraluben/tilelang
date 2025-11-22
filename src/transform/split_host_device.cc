@@ -43,8 +43,17 @@ namespace tir = tvm::tir;
 class HostDeviceSplitter : public tir::StmtMutator {
 public:
   explicit HostDeviceSplitter(IRModule *device_mod,
-                              std::function<GlobalVar()> var_supply)
-      : device_mod_(device_mod), var_supply_(std::move(var_supply)) {}
+                              std::function<GlobalVar()> var_supply,
+                              const tir::PrimFunc &func)
+      : device_mod_(device_mod), var_supply_(std::move(var_supply)) {
+    // todo: only record box size, codegen_musa.cc related code also should be fixed
+    if (auto attr = func->GetAttr<Map<tir::Var, Array<PrimExpr>>>(
+            "tma_descriptor_args")) {
+      for (const auto &kv : attr.value()) {
+        tma_descriptor_args_.Set(kv.first->name_hint, kv.second);
+      }
+    }
+  }
 
   tir::Stmt VisitStmt_(const tir::AttrStmtNode *op) final {
     if (op->attr_key == tvm::attr::kTarget) {
@@ -63,6 +72,7 @@ public:
 
 private:
   bool found_device_region_{false};
+  Map<String, Array<PrimExpr>> tma_descriptor_args_;
 
   tir::Stmt SplitDeviceFunc(tir::Stmt body, tvm::Target device_target) {
     auto [params, buffers_to_declare] =
@@ -112,6 +122,10 @@ private:
         WithAttrs(std::move(device_func), {{tvm::attr::kTarget, device_target},
                                            {tir::attr::kNoAlias, true},
                                            {tir::attr::kIsGlobalFunc, true}});
+    if (!tma_descriptor_args_.empty()) {
+      device_func = WithAttr(std::move(device_func), "tma_descriptor_args",
+                             tma_descriptor_args_);
+    }
 
     GlobalVar kernel_symbol_global = var_supply_();
     (*device_mod_)->Add(kernel_symbol_global, device_func);
@@ -142,7 +156,7 @@ private:
 
 tir::PrimFunc SplitHostDevice(tir::PrimFunc func, IRModule *device_mod,
                               std::function<GlobalVar()> var_supply) {
-  HostDeviceSplitter splitter(device_mod, std::move(var_supply));
+  HostDeviceSplitter splitter(device_mod, std::move(var_supply), func);
 
   if (auto body = splitter(func->body); !body.same_as(func->body)) {
     func.CopyOnWrite()->body = body;

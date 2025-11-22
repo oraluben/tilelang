@@ -257,6 +257,35 @@ void CodeGenTileLangMUSA::PrintExtraAttrs(const PrimFunc &f) {
   }
 }
 
+std::vector<PrimExpr>
+CodeGenTileLangMUSA::GetTMASmemBox(const PrimExpr &desc) const {
+  std::vector<PrimExpr> smem_box;
+  const auto *var = desc.as<VarNode>();
+  if (!var)
+    return smem_box;
+
+  auto it = tma_descriptor_args_.find(var->name_hint);
+  if (it == tma_descriptor_args_.end())
+    return smem_box;
+
+  const Array<PrimExpr> &args = it->second;
+  if (args.size() < 4)
+    return smem_box;
+
+  const auto *rank_imm = args[3].as<IntImmNode>();
+  if (!rank_imm)
+    return smem_box;
+  int rank = rank_imm->value;
+  size_t smem_box_start = 5 + 2 * static_cast<size_t>(rank);
+  if (smem_box_start + static_cast<size_t>(rank) > args.size())
+    return smem_box;
+
+  for (int i = 0; i < rank; ++i) {
+    smem_box.push_back(args[smem_box_start + i]);
+  }
+  return smem_box;
+}
+
 std::string CodeGenTileLangMUSA::Finish() {
 
   decl_stream << "#include <tl_templates/musa/common.h>\n";
@@ -1532,7 +1561,7 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
     return;
   } else if (op->op.same_as(tl::tma_load())) {
     std::ostringstream ss;
-    ICHECK_GE(op->args.size(), 2);
+    ICHECK_GE(op->args.size(), 4U);
     auto eviction_policy =
         this->eviction_policy_names_
             [op->args[op->args.size() - 1].as<IntImmNode>()->value];
@@ -1543,16 +1572,25 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
       ss << "tl::tma_load(";
     }
     auto desc = op->args[0];
+    auto smem = op->args[2];
+    auto tile_shape = GetTMASmemBox(desc);
+    size_t coord_start = 3;
+    size_t coord_end = op->args.size() - 1;
+    ICHECK_GE(coord_end, coord_start);
+    size_t coord_count = coord_end - coord_start;
+    ICHECK_GT(coord_count, 0U);
+    ICHECK_EQ(tile_shape.size(), coord_count);
     ss << this->PrintExpr(desc) << ", ";
     ss << print_mbarrier_id(op->args[1]) << ", ";
-    auto smem = op->args[2];
     ss << this->PrintExpr(smem) << ", ";
-    for (size_t i = 3; i < op->args.size() - 1; i++) {
-      if (i > 3)
+    for (size_t i = coord_start; i < coord_end; i++) {
+      if (i > coord_start)
         ss << ", ";
       ss << this->PrintExpr(op->args[i]);
     }
-    ss << ",128, 128"; // to fix
+    for (size_t i = 0; i < tile_shape.size(); ++i) {
+      ss << ", " << this->PrintExpr(tile_shape[i]);
+    }
     ss << ");\n";
     this->PrintIndent();
     this->stream << ss.str();
@@ -1574,6 +1612,7 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
       print_extern_call_stmt("tl::tma_store_add", 0, 2);
       return;
     }
+    ICHECK_GE(op->args.size(), 4U);
     auto eviction_policy =
         this->eviction_policy_names_
             [op->args[op->args.size() - 1].as<IntImmNode>()->value];
@@ -1583,15 +1622,24 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
       ss << "tl::tma_store(";
     }
     auto desc = op->args[0];
-    ss << this->PrintExpr(desc) << ", ";
     auto smem = op->args[1];
+    auto tile_shape = GetTMASmemBox(desc);
+    size_t coord_start = 2;
+    size_t coord_end = op->args.size() - 2;
+    ICHECK_GE(coord_end, coord_start);
+    size_t coord_count = coord_end - coord_start;
+    ICHECK_GT(coord_count, 0U);
+    ICHECK_EQ(tile_shape.size(), coord_count);
+    ss << this->PrintExpr(desc) << ", ";
     ss << this->PrintExpr(smem) << ", ";
-    for (size_t i = 2; i < op->args.size() - 2; i++) {
-      if (i > 2)
+    for (size_t i = coord_start; i < coord_end; i++) {
+      if (i > coord_start)
         ss << ", ";
       ss << this->PrintExpr(op->args[i]);
     }
-    ss << ",128, 128"; // to fix
+    for (size_t i = 0; i < tile_shape.size(); ++i) {
+      ss << ", " << this->PrintExpr(tile_shape[i]);
+    }
     ss << ");\n";
     this->PrintIndent();
     this->stream << ss.str();
@@ -3285,6 +3333,13 @@ void CodeGenTileLangMUSA::AddFunction(const GlobalVar &gvar,
   CodeGenC::DeclareFunction(gvar, f);
   // clear previous generated state.
   this->InitFuncState(f);
+  tma_descriptor_args_.clear();
+  if (auto attr =
+          f->GetAttr<Map<String, Array<PrimExpr>>>("tma_descriptor_args")) {
+    for (const auto &kv : attr.value()) {
+      tma_descriptor_args_[kv.first] = kv.second;
+    }
+  }
   // reserve keywords
   ReserveKeywordsAsUnique();
 
