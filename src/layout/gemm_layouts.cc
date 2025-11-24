@@ -18,6 +18,15 @@ IterVar make_itervar(std::string name, PrimExpr dom) {
   return IterVar(Range(0, dom), var, IterVarType::kDataPar);
 }
 
+Fragment makeGemmFragment4x8() {
+  IterVar i = make_itervar("i", 4);
+  IterVar j = make_itervar("j", 8);
+  IterVar rep = make_itervar("rep", 1);
+  PrimExpr forward_thread = FloorDiv(j->var, 1) + 8 * i;
+  PrimExpr index = FloorMod(j->var, 1);
+  return Fragment({i, j}, {index}, forward_thread, rep);
+}
+
 Fragment makeGemmFragment8x4() {
   IterVar i = make_itervar("i", 8);
   IterVar j = make_itervar("j", 4);
@@ -184,6 +193,19 @@ Fragment makeGemmFragmentCHopper(const int block_m, const int block_n,
   auto block_layout = warp_layout->Repeat({block_m / warp_m, block_n / warp_n},
                                           true, false); // 16*Y x N (Y warp)
   return block_layout->Repeat({warp_m / 16, 1}, false, false);
+}
+
+Fragment makeGemmFragmentCPh1(const int block_m, const int block_n,
+                              const int warp_m, const int warp_n,
+                              const int element_size) {
+  ICHECK(warp_m * warp_n == 4);
+  ICHECK(block_m == 128 || block_m == 32);
+  ICHECK(block_m == block_n);
+  ICHECK(element_size == 8 || element_size == 16);
+
+  auto warp_layout = makeGemmFragment4x8();
+  auto block_layout = warp_layout->Repeat({4, 1}, true, false);
+  return block_layout->Repeat({block_m / 8, block_n / 16}, false, false);
 }
 
 Fragment makeGemmFragmentA(const int block_m, const int block_n,
