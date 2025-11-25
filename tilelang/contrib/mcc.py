@@ -8,7 +8,7 @@ import os
 import subprocess
 import warnings
 import contextlib
-from tilelang.env import MUSA_HOME, TILELANG_TEMPLATE_PATH
+from tilelang.env import MUSA_HOME, MUTLASS_INCLUDE_DIR, TILELANG_TEMPLATE_PATH
 import shutil
 import tempfile
 import tvm_ffi
@@ -147,11 +147,11 @@ def default_compile_options(compile_flags: list[str] | None = None) -> list[str]
     except Exception:
         pass
 
-    # try:
-    #     if MUTLASS_INCLUDE_DIR:
-    #         options.append(f"-I{MUTLASS_INCLUDE_DIR}")
-    # except Exception:
-    #     pass
+    try:
+        if MUTLASS_INCLUDE_DIR:
+            options.append(f"-I{MUTLASS_INCLUDE_DIR}")
+    except Exception:
+        pass
 
     try:
         if MUSA_HOME:

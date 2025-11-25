@@ -1186,7 +1186,7 @@ void CodeGenTileLangMUSA::VisitExpr_(const MinNode *op, std::ostream &os) {
 
   // Standard min/max functions don't support bfloat16 or float16
   if ((t.is_bfloat16() || t.is_float16()) && t.is_scalar()) {
-    os << "cutlass::fast_min(" << PrintExpr(op->a) << ", " << PrintExpr(op->b)
+    os << "mutlass::fast_min(" << PrintExpr(op->a) << ", " << PrintExpr(op->b)
        << ")";
     return;
   }
@@ -1209,7 +1209,7 @@ void CodeGenTileLangMUSA::VisitExpr_(const MaxNode *op, std::ostream &os) {
 
   // Standard min/max functions don't support bfloat16 or float16
   if ((t.is_bfloat16() || t.is_float16()) && t.is_scalar()) {
-    os << "cutlass::fast_max(" << PrintExpr(op->a) << ", " << PrintExpr(op->b)
+    os << "mutlass::fast_max(" << PrintExpr(op->a) << ", " << PrintExpr(op->b)
        << ")";
     return;
   }
@@ -1296,7 +1296,7 @@ std::string CodeGenTileLangMUSA::GetBufferRef(DataType t,
     scope = alloc_storage_scope_.at(buffer_var);
   }
   // bool is_vol = IsVolatile(buffer_var);
-  // always false for tl cutlass backend.
+  // always false for tl mutlass backend.
   bool is_vol = false;
 
   auto ptr_cast = [this, is_vol, scope](DataType pointed_to) {
@@ -3061,7 +3061,7 @@ void CodeGenTileLangMUSA::VisitExpr_(const BroadcastNode *op,
 inline void PrintConst(const FloatImmNode *op, std::ostream &os,
                        CodeGenTileLangMUSA *p) { // NOLINT(*)
   // Type code is kBFloat/kFloat16
-  // which is indeed CUTLASS supported types currently
+  // which is indeed MUTLASS supported types currently
   if (op->dtype.is_bfloat16() || op->dtype.is_float16()) {
     std::ostringstream temp;
     if (std::isinf(op->value)) {

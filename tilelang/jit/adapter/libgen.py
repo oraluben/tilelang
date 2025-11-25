@@ -115,6 +115,7 @@ class LibraryGenerator:
                 "-I" + CUTLASS_INCLUDE_DIR,
             ]
         elif is_musa_target(target):
+            from tilelang.env import MUTLASS_INCLUDE_DIR
             src = tempfile.NamedTemporaryFile(mode="w", suffix=".mu", delete=False)  # noqa: SIM115
             target_arch = get_musa_arch(get_musa_compute_version(target))
             libpath = src.name.replace(".mu", ".so")
@@ -128,6 +129,7 @@ class LibraryGenerator:
                 # "-lmusart",
                 # "-lmusa",
                 f"--offload-arch=mp_{target_arch}",
+                "-I" + CUTLASS_INCLUDE_DIR,
             ]
 
         elif is_hip_target(target):

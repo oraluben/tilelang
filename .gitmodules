@@ -7,3 +7,6 @@
 [submodule "3rdparty/composable_kernel"]
 	path = 3rdparty/composable_kernel
 	url = https://github.com/ROCm/composable_kernel
+[submodule "3rdparty/mutlass"]
+	path = 3rdparty/mutlass
+	url = git@sh-code.mthreads.com:sw/mutlass.git
