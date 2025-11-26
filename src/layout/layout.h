@@ -155,6 +155,9 @@ Fragment makeGemmFragmentCCDNA(const int block_m, const int block_n,
 Fragment makeGemmFragmentCHopper(const int block_m, const int block_n,
                                  const int warp_m, const int warp_n,
                                  const int element_size);
+Fragment makeGemmFragmentCPH1(const int block_m, const int block_n,
+                              const int warp_m, const int warp_n,
+                              const int element_size);
 Fragment makeGemmFragmentA(const int block_m, const int block_n,
                            const int block_k, const int warp_m,
                            const int warp_n, const int element_size,
@@ -176,6 +179,9 @@ Layout makeGemmABLayout(int mat_stride, int mat_continuous, int continuity,
 Layout makeGemmABLayoutHopper(int mat_stride, int mat_continuous,
                               int continuity, int element_size,
                               bool k_inner = true);
+Layout makeGemmABLayoutPH1(int mat_stride, int mat_continuous,
+                           int continuity, int element_size,
+                           bool k_inner = true);
 Layout makeGemmABLayoutSm100(int mat_stride, int mat_continuous, int continuity,
                              int element_size, bool k_inner = true);
 Layout makeGemmABLayoutCDNA(int stride, int continuous, int element_size,

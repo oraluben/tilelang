@@ -130,6 +130,8 @@ GemmInst GemmNode::GetGemmInst(int block_size, Target target) const {
     return GemmInst::kMFMA;
   } else if (TargetIsCuda(target)) {
     return GemmInst::kMMA;
+  } else if (TargetIsPH1(target)) {
+    return GemmInst::SQMMA;
   } else {
     ICHECK(0) << "Unsupported target for gemm: " << target;
   }
@@ -137,6 +139,9 @@ GemmInst GemmNode::GetGemmInst(int block_size, Target target) const {
 
 std::pair<int, int> GemmWarpPolicyNode::ComputeWarpPartition(
     int M, int N, int block_size, Target target, GemmInst gemm_inst) const {
+  if (gemm_inst == GemmInst::SQMMA) {
+    return {4, 1};
+  }
   int num_warps = block_size / TargetGetWarpSize(target);
   if (gemm_inst == GemmInst::kTCGEN5MMA) {
     return {1, num_warps}; // TCGEN5MMA doesn't care about warp partitioning
@@ -706,6 +711,33 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &T,
           makeGemmFragmentB(M, N, K, M / warp_m, N / warp_n, trans_B);
       results.Set(B, fragment->BindThreadRange(thread_range));
     }
+  } else if (TargetIsPH1(T.target)) {
+    ICHECK(A.scope() == "shared" || A.scope() == "shared.dyn");
+    ICHECK(B.scope() == "shared" || B.scope() == "shared.dyn");
+    ICHECK(C.scope() == "local.fragment");
+    ICHECK(gemm_inst == GemmInst::SQMMA);
+    // C layout
+    auto fragment = makeGemmFragmentCPH1(M, N, warp_m, warp_n,
+                                         C->dtype.bits());
+    results.Set(C, fragment->BindThreadRange(thread_range));
+    
+    // A layout
+    int dim_A = A->shape.size();
+    const int64_t a_mat_stride = *as_const_int(A->shape[dim_A - 2]);
+    const int64_t a_mat_continuous = *as_const_int(A->shape[dim_A - 1]);
+    const int64_t a_continuity = trans_A ? 4 * a_mat_continuous / warp_m : a_mat_continuous;
+    auto ALayout = makeGemmABLayoutPH1(a_mat_stride, a_mat_continuous, a_continuity,
+                                          A->dtype.bits(), !trans_A);
+    results.Set(A, ALayout);
+    
+    // B layout
+    int dim_B = B->shape.size();
+    const int64_t b_mat_stride = *as_const_int(B->shape[dim_B - 2]);
+    const int64_t b_mat_continuous = *as_const_int(B->shape[dim_B - 1]);
+    const int64_t b_continuity = trans_B ? b_mat_continuous : b_mat_continuous / warp_n;
+    auto BLayout = makeGemmABLayoutPH1(b_mat_stride, b_mat_continuous, b_continuity,
+                                       B->dtype.bits(), trans_B);
+    results.Set(B, BLayout);
   } else if (gemm_inst == GemmInst::kTCGEN5MMA) {
     ICHECK(C.scope() == "shared.tmem")
         << "TCGEN5MMA only supports C in shared.tmem scope, got " << C.scope();

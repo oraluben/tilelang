@@ -195,16 +195,17 @@ Fragment makeGemmFragmentCHopper(const int block_m, const int block_n,
   return block_layout->Repeat({warp_m / 16, 1}, false, false);
 }
 
-Fragment makeGemmFragmentCPh1(const int block_m, const int block_n,
+Fragment makeGemmFragmentCPH1(const int block_m, const int block_n,
                               const int warp_m, const int warp_n,
                               const int element_size) {
-  ICHECK(warp_m * warp_n == 4);
+  ICHECK(warp_m == 4);
+  ICHECK(warp_n == 1);
   ICHECK(block_m == 128 || block_m == 32);
   ICHECK(block_m == block_n);
-  ICHECK(element_size == 8 || element_size == 16);
+  ICHECK(element_size == 32);
 
   auto warp_layout = makeGemmFragment4x8();
-  auto block_layout = warp_layout->Repeat({4, 1}, true, false);
+  auto block_layout = warp_layout->Repeat({warp_m, warp_n}, true, false);
   return block_layout->Repeat({block_m / 16, block_n / 8}, false, false);
 }
 
@@ -783,6 +784,19 @@ Layout makeGemmABLayoutHopper(int mat_stride, int mat_continuous,
     return makeGemmLayoutLinear(mat_stride, mat_continuous);
   else
     ICHECK(0) << "Unsupported layout for Hopper with stride=" << mat_stride
+              << ", continuous=" << mat_continuous
+              << ", element_size=" << element_size << ", k_inner=" << k_inner;
+}
+
+// TODO
+Layout makeGemmABLayoutPH1(int mat_stride, int mat_continuous,
+                           int continuity, int element_size, bool k_inner) {
+  int vector_size = 128 / element_size;
+
+  if (mat_continuous % (vector_size * 8) == 0)
+    return makeFullBankSwizzleLayout(mat_stride, mat_continuous, element_size);
+  else
+    ICHECK(0) << "Unsupported layout for PH1 with stride=" << mat_stride
               << ", continuous=" << mat_continuous
               << ", element_size=" << element_size << ", k_inner=" << k_inner;
 }
