@@ -129,7 +129,7 @@ class LibraryGenerator:
                 # "-lmusart",
                 # "-lmusa",
                 f"--offload-arch=mp_{target_arch}",
-                "-I" + CUTLASS_INCLUDE_DIR,
+                "-I" + MUTLASS_INCLUDE_DIR,
             ]
 
         elif is_hip_target(target):
