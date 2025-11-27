@@ -789,15 +789,22 @@ Layout makeGemmABLayoutHopper(int mat_stride, int mat_continuous,
               << ", element_size=" << element_size << ", k_inner=" << k_inner;
 }
 
-// TODO
+// MTGPU TODO
 Layout makeGemmABLayoutPH1(int mat_stride, int mat_continuous,
                            int continuity, int element_size, bool k_inner) {
   int vector_size = 128 / element_size;
 
   if (mat_continuous % (vector_size * 8) == 0)
     return makeFullBankSwizzleLayout(mat_stride, mat_continuous, element_size);
+  else if (mat_continuous % (vector_size * 4) == 0)
+    return makeHalfBankSwizzleLayout(mat_stride, mat_continuous, element_size);
+  else if (mat_continuous % (vector_size * 2) == 0)
+    return makeQuarterBankSwizzleLayout(mat_stride, mat_continuous,
+                                        element_size);
+  else if (mat_continuous % vector_size == 0)
+    return makeGemmLayoutLinear(mat_stride, mat_continuous);
   else
-    ICHECK(0) << "Unsupported layout for PH1 with stride=" << mat_stride
+    ICHECK(0) << "Unsupported layout for Hopper with stride=" << mat_stride
               << ", continuous=" << mat_continuous
               << ", element_size=" << element_size << ", k_inner=" << k_inner;
 }
