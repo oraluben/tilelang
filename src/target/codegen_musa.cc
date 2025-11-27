@@ -321,7 +321,7 @@ std::string CodeGenTileLangMUSA::Finish() {
     decl_stream << "#include <cooperative_groups.h>\n";
   }
 
-  // decl_stream << "#include <tl_templates/musa/gemm.h>\n";
+  decl_stream << "#include <tl_templates/musa/gemm.h>\n";
   // if (enable_sparse_gemm_) {
   //   decl_stream << "#include <tl_templates/musa/gemm_sp.h>\n";
   // }

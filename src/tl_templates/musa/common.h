@@ -5,6 +5,27 @@
 #include <musa_runtime.h>
 #include <musa_bf16.h>
 #include <musa_fp16.h>
+#include <mutlass/numeric_types.h>
+
+
+using uint = unsigned int;
+using uchar = unsigned char;
+using ushort = unsigned short;
+
+using mutlass::bfloat16_t;
+using mutlass::half_t;
+using mutlass::tfloat32_t;
+
+
+using  v2i32_t = int32_t __attribute__((vector_size(8)));
+using  v3i32_t = int32_t __attribute__((vector_size(12)));
+using  v4i32_t = int32_t __attribute__((vector_size(16)));
+using  v5i32_t = int32_t __attribute__((vector_size(20)));
+using  v8i32_t = int32_t __attribute__((vector_size(32)));
+using v16i32_t = int32_t __attribute__((vector_size(64)));
+using v32i32_t = int32_t __attribute__((vector_size(128)));
+
+
 
 #define TL_HOST_DEVICE __forceinline__ __host__ __device__
 #define TL_DEVICE __forceinline__ __device__
@@ -33,21 +54,6 @@
     }                                                                          \
   } while (0)
 
-
-using uint = unsigned int;
-using uchar = unsigned char;
-using ushort = unsigned short;
-
-
-using bfloat16_t = __mt_bfloat16;
-using half_t = __half;
-using  v2i32_t = int32_t __attribute__((vector_size(8)));
-using  v3i32_t = int32_t __attribute__((vector_size(12)));
-using  v4i32_t = int32_t __attribute__((vector_size(16)));
-using  v5i32_t = int32_t __attribute__((vector_size(20)));
-using  v8i32_t = int32_t __attribute__((vector_size(32)));
-using v16i32_t = int32_t __attribute__((vector_size(64)));
-using v32i32_t = int32_t __attribute__((vector_size(128)));
 
 static const int NumThreadsPerWarpBeforeMP31 = 128;
 static const int NumThreadsPerWarp = 32;
@@ -107,4 +113,40 @@ cast_smem_ptr_to_uint(void const* const ptr)
 {
   /// MUTE helper to get SMEM pointer
   return static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
+}
+
+namespace tl {
+
+struct float_e4m3_t : public mutlass::float_e4m3_t {
+  using mutlass::float_e4m3_t::float_e4m3_t;
+
+  TL_HOST_DEVICE
+  float_e4m3_t() = default;
+
+  TL_HOST_DEVICE
+  explicit float_e4m3_t(__mt_bfloat16 x)
+      : float_e4m3_t(static_cast<float>(x)) {}
+};
+
+struct float_e5m2_t : public mutlass::float_e5m2_t {
+  using mutlass::float_e5m2_t::float_e5m2_t;
+
+  TL_HOST_DEVICE
+  float_e5m2_t() = default;
+
+  TL_HOST_DEVICE
+  explicit float_e5m2_t(__mt_bfloat16 x)
+      : float_e5m2_t(static_cast<float>(x)) {}
+};
+
+template <typename T> struct to_mute_type {
+  using type = T;
+};
+
+template <> struct to_mute_type<tl::float_e4m3_t> {
+  using type = mutlass::float_e4m3_t;
+};
+template <> struct to_mute_type<tl::float_e5m2_t> {
+  using type = mutlass::float_e5m2_t;
+};
 }

@@ -40,7 +40,7 @@ if __name__ == "__main__":
     K = 1024
     block_M = 128
     block_N = 128
-    block_K = 32
+    block_K = 64
     program = matmul(M, N, K, block_M, block_N, block_K)
     kernel = tilelang.compile(
         program,
@@ -55,16 +55,16 @@ if __name__ == "__main__":
     # kernel.artifact.device_mod.show()
     print(kernel.get_kernel_source())
 
-    # import torch
+    import torch
 
     # torch.musa.set_device(0)
 
-    # a = torch.randn(M, K, device="musa", dtype=torch.float16)
-    # b = torch.randn(K, N, device="musa", dtype=torch.float16)
-    # print('start kernel')
-    # c = kernel(a, b)
-    # print('start ref')
-    # ref_c = a @ b
-    # print('compare')
-    # torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
-    # print("matmul matches torch reference.")
+    a = torch.randn(M, K, device="musa", dtype=torch.float16)
+    b = torch.randn(K, N, device="musa", dtype=torch.float16)
+    print('start kernel')
+    c = kernel(a, b)
+    print('start ref')
+    ref_c = a @ b
+    print('compare')
+    torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
+    print("matmul matches torch reference.")

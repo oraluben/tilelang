@@ -131,7 +131,7 @@ GemmInst GemmNode::GetGemmInst(int block_size, Target target) const {
   } else if (TargetIsCuda(target)) {
     return GemmInst::kMMA;
   } else if (TargetIsPH1(target)) {
-    return GemmInst::SQMMA;
+    return GemmInst::kSQMMA;
   } else {
     ICHECK(0) << "Unsupported target for gemm: " << target;
   }
@@ -139,7 +139,7 @@ GemmInst GemmNode::GetGemmInst(int block_size, Target target) const {
 
 std::pair<int, int> GemmWarpPolicyNode::ComputeWarpPartition(
     int M, int N, int block_size, Target target, GemmInst gemm_inst) const {
-  if (gemm_inst == GemmInst::SQMMA) {
+  if (gemm_inst == GemmInst::kSQMMA) {
     return {4, 1};
   }
   int num_warps = block_size / TargetGetWarpSize(target);
@@ -539,7 +539,7 @@ Stmt GemmNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
   ICHECK(clear_accum_bool.has_value())
       << "clear_accum must be a constant Bool type, got " << clear_accum;
   ss << ", " << bool(clear_accum_bool.value());
-  if (TargetIsCuda(T.target) && (GetArchInt(T.target) >= 75)) {
+  if ((TargetIsCuda(T.target) && (GetArchInt(T.target) >= 75)) || (TargetIsPH1(T.target))) {
     ss << ", " << stride_A << ", " << stride_B;
     ss << ", " << offset_A << ", " << offset_B;
   }
@@ -548,10 +548,12 @@ Stmt GemmNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     ss << ", " << kPack;
   } else if (TargetIsHopper(T.target)) {
     ss << ", " << (gemm_inst == GemmInst::kWGMMA ? "true" : "false");
+  } else if (TargetIsPH1(T.target)) {
+    ss << ", " << (gemm_inst == GemmInst::kSQMMA ? "true" : "false");
   }
 
   // Emit wg_wait if necessary
-  if (TargetIsHopper(T.target)) {
+  if (TargetIsHopper(T.target) && TargetIsPH1(T.target)) {
     if (wg_wait != 0) {
       ss << ", " << wg_wait;
     }
@@ -715,12 +717,12 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &T,
     ICHECK(A.scope() == "shared" || A.scope() == "shared.dyn");
     ICHECK(B.scope() == "shared" || B.scope() == "shared.dyn");
     ICHECK(C.scope() == "local.fragment");
-    ICHECK(gemm_inst == GemmInst::SQMMA);
+    ICHECK(gemm_inst == GemmInst::kSQMMA);
     // C layout
     auto fragment = makeGemmFragmentCPH1(M, N, warp_m, warp_n,
                                          C->dtype.bits());
     results.Set(C, fragment->BindThreadRange(thread_range));
-    
+
     // A layout
     int dim_A = A->shape.size();
     const int64_t a_mat_stride = *as_const_int(A->shape[dim_A - 2]);
@@ -729,7 +731,7 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &T,
     auto ALayout = makeGemmABLayoutPH1(a_mat_stride, a_mat_continuous, a_continuity,
                                           A->dtype.bits(), !trans_A);
     results.Set(A, ALayout);
-    
+
     // B layout
     int dim_B = B->shape.size();
     const int64_t b_mat_stride = *as_const_int(B->shape[dim_B - 2]);
