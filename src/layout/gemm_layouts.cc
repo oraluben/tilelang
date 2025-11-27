@@ -206,7 +206,8 @@ Fragment makeGemmFragmentCPH1(const int block_m, const int block_n,
 
   auto warp_layout = makeGemmFragment4x8();
   auto block_layout = warp_layout->Repeat({warp_m, warp_n}, true, false);
-  return block_layout->Repeat({block_m / 16, block_n / 8}, false, false);
+  auto register_layout = block_layout->Repeat({1, block_n / 8}, false, false);
+  return register_layout->Repeat({block_m / 16, 1}, false, false);
 }
 
 Fragment makeGemmFragmentA(const int block_m, const int block_n,
