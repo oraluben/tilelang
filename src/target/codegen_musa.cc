@@ -1562,7 +1562,7 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
                  << op->args.size();
     }
   } else if (op->op.same_as(builtin::ptx_cp_async_barrier())) {
-    print_extern_call_stmt("tl::mbarrier_cp_async_arrive");
+    // print_extern_call_stmt("tl::mbarrier_cp_async_arrive");
   } else if (op->op.same_as(tl::ptx_fence_barrier_init())) {
     print_extern_call_stmt("tl::fence_barrier_init");
   } else if (op->op.same_as(tl::ptx_cp_async_barrier_noinc())) {

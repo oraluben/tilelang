@@ -366,7 +366,10 @@ class TLMUSASourceWrapper:
                 box_dim = remaining_args[2 * tensor_rank:3 * tensor_rank]
                 element_strides = remaining_args[3 * tensor_rank:4 * tensor_rank]
 
-                global_dim = [self._pythonic_expr(i) for i in global_dim]
+                global_dim = [
+                    f"static_cast<muuint64_t>({self._pythonic_expr(i)})"
+                    for i in global_dim
+                ]
                 global_stride = [self._pythonic_expr(i) for i in global_stride]
                 box_dim = [self._pythonic_expr(i) for i in box_dim]
                 element_strides = [self._pythonic_expr(i) for i in element_strides]
