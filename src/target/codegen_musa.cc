@@ -334,9 +334,9 @@ std::string CodeGenTileLangMUSA::Finish() {
   // if (need_tcgen05_common_h_) {
   //   decl_stream << "#include <tl_templates/musa/tcgen_05.h>\n";
   // }
-  // if (enable_fp8_) {
-  //   decl_stream << "#include <tl_templates/musa/musa_fp8.h>\n";
-  // }
+  if (enable_fp8_) {
+    decl_stream << "#include <tl_templates/musa/musa_fp8.h>\n";
+  }
 
   if (need_math_constants_h_) {
     decl_stream << "#include <math_constants.h>\n";
@@ -354,7 +354,7 @@ std::string CodeGenTileLangMUSA::Finish() {
   decl_stream << "#include <tl_templates/musa/barrier.h>\n";
   // decl_stream << "#include <tl_templates/musa/reduce.h>\n";
   // decl_stream << "#include <tl_templates/musa/ldsm.h>\n";
-  // decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";
+  decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";
   // decl_stream << "#include <tl_templates/musa/debug.h>\n";
 
   if (need_global_barrier_) {
