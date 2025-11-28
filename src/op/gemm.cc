@@ -567,10 +567,11 @@ Stmt GemmNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     ICHECK(wg_wait == 0)
         << "wg_wait must be 0 for non-Hopper and non-Sm100 targets";
   }
-  ss << ">";
+  ss << ">"; // tl::gemm op end
 
   auto new_call = Call(DataType::Handle(), tl::tl_gemm(),
                        Array<PrimExpr>{StringImm(ss.str()), Aptr, Bptr, Cptr});
+
   return Evaluate(new_call);
 }
 

@@ -261,30 +261,54 @@ std::vector<PrimExpr>
 CodeGenTileLangMUSA::GetTMASmemBox(const PrimExpr &desc) const {
   std::vector<PrimExpr> smem_box;
   const auto *var = desc.as<VarNode>();
-  if (!var)
+  if (!var) {
     return smem_box;
-
+  }
   auto it = tma_descriptor_args_.find(var->name_hint);
-  if (it == tma_descriptor_args_.end())
+  if (it == tma_descriptor_args_.end()) {
     return smem_box;
-
+  }
   const Array<PrimExpr> &args = it->second;
-  if (args.size() < 4)
+  if (args.size() < 4) {
     return smem_box;
+  }
 
   const auto *rank_imm = args[3].as<IntImmNode>();
-  if (!rank_imm)
+  if (!rank_imm) {
     return smem_box;
+  }
   int rank = rank_imm->value;
   size_t smem_box_start = 5 + 2 * static_cast<size_t>(rank);
-  if (smem_box_start + static_cast<size_t>(rank) > args.size())
+  if (smem_box_start + static_cast<size_t>(rank) > args.size()) {
     return smem_box;
+  }
 
   for (int i = 0; i < rank; ++i) {
     smem_box.push_back(args[smem_box_start + i]);
   }
   return smem_box;
 }
+
+MUsmemSwizzleGranularity CodeGenTileLangMUSA::GetTMASwizzleGranularity(const PrimExpr &desc) const {
+  const auto *var = desc.as<VarNode>();
+  if (!var) {
+    return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
+  }
+  auto it = tma_descriptor_args_.find(var->name_hint);
+  if (it == tma_descriptor_args_.end()) {
+    return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
+  }
+  const Array<PrimExpr> &args = it->second;
+  if (args.size() < TME_DESC_SIZE) {
+    return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
+  }
+  const auto *sg = args[14].as<IntImmNode>();
+  if (!sg) {
+    return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
+  }
+  return MUsmemSwizzleGranularity(sg->value);
+}
+
 
 std::string CodeGenTileLangMUSA::Finish() {
 
@@ -1505,8 +1529,8 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
     auto mbarrier_id = print_mbarrier_id(op->args[0]);
     auto arrive_count = this->PrintExpr(op->args[1]);
     auto warp_count = "((" + arrive_count + " + 31) / 32)";
-    this->stream << "__musa_async_init_arrival(" << mbarrier_id << ", " << warp_count
-                 << ", 0);\n";
+    this->stream << "__musa_async_init_arrival(" << mbarrier_id << ", "
+                 << warp_count << ", 0);\n";
   } else if (op->op.same_as(tl::musa_sync())) {
     ICHECK_EQ(op->args.size(), 2);
     this->PrintIndent();
@@ -1519,7 +1543,8 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
       auto mbarrier_id = print_mbarrier_id(op->args[0]);
       auto transaction_bytes = this->PrintExpr(op->args[1]);
       this->PrintIndent();
-      this->stream << "__musa_async_add_trans(" << mbarrier_id << ", " << transaction_bytes << ");\n";
+      this->stream << "__musa_async_add_trans(" << mbarrier_id << ", "
+                   << transaction_bytes << ");\n";
       this->PrintIndent();
       this->stream << "__musa_async_arrive(" << mbarrier_id << ");\n";
     } else if (op->args.size() == 4) {
@@ -1546,13 +1571,15 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
     this->PrintIndent();
     auto mbarrier_id = print_mbarrier_id(op->args[0]);
     auto transaction_bytes = this->PrintExpr(op->args[1]);
-    this->stream << "__musa_async_add_trans(" << mbarrier_id << ", " << transaction_bytes << ");\n";
+    this->stream << "__musa_async_add_trans(" << mbarrier_id << ", "
+                 << transaction_bytes << ");\n";
   } else if (op->op.same_as(tl::mbarrier_wait_parity())) {
     ICHECK_EQ(op->args.size(), 2);
     this->PrintIndent();
     auto mbarrier_id = print_mbarrier_id(op->args[0]);
     auto phase = this->PrintExpr(op->args[1]);
-    this->stream << "__musa_async_wait(" << mbarrier_id << ", " << phase << ");\n";
+    this->stream << "__musa_async_wait(" << mbarrier_id << ", " << phase
+                 << ");\n";
   } else if (op->op.same_as(tl::ptx_init_tensor_memory())) {
     print_extern_call_stmt("tl::tmem_allocate");
   } else if (op->op.same_as(tl::ptx_deallocate_tensor_memory())) {
@@ -1566,13 +1593,10 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
         this->eviction_policy_names_
             [op->args[op->args.size() - 1].as<IntImmNode>()->value];
     // Simplify the code by using the default eviction policy
-    if (eviction_policy != "EVICT_NORMAL") {
-      ss << "tl::tma_load<tl::CacheHintSm90::" << eviction_policy << ">(";
-    } else {
-      ss << "tl::tma_load(";
-    }
     auto desc = op->args[0];
     auto smem = op->args[2];
+    auto sg = GetTMASwizzleGranularity(desc);
+    ss << "tl::tma_load<" << ToString(sg) << ">(";
     auto tile_shape = GetTMASmemBox(desc);
     size_t coord_start = 3;
     size_t coord_end = op->args.size() - 1;
@@ -2303,8 +2327,8 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
       os << "}\n";
     } else {
       os << "for (int local_id = 0; local_id < 8; ++local_id) {\n";
-      os << dst << "[" + this->PrintExpr(dst_ind) + "]" << " = " << src << "["
-         << src_offset << " + local_id];\n";
+      os << dst << "[" + this->PrintExpr(dst_ind) + "]"
+         << " = " << src << "[" << src_offset << " + local_id];\n";
       os << "}\n";
     }
 

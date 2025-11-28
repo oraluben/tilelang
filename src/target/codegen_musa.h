@@ -14,6 +14,7 @@
 
 #include "target/source/codegen_c.h"
 #include "tvm/ffi/string.h"
+#include "musa.h"
 
 namespace tvm {
 namespace codegen {
@@ -156,6 +157,7 @@ private:
       "bf1622float2", "bf1622int16", "float22bf162", "bf162bf162"};
 
   std::vector<PrimExpr> GetTMASmemBox(const PrimExpr &desc) const;
+  MUsmemSwizzleGranularity GetTMASwizzleGranularity(const PrimExpr &desc) const;
 };
 
 } // namespace codegen

@@ -1577,13 +1577,37 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
     }
   }
 
+  if (TargetIsMusa(T.target)) {
+    auto get_gemm_role = [&](const Buffer &buf) -> int {
+      const auto &data_var = buf->data;
+      for (size_t i = 0; i < T.buffer_var_gemm.size(); ++i) {
+        if (data_var->name_hint == T.buffer_var_gemm[i]->name_hint)
+          return static_cast<int>(i);
+      }
+      return -1;
+    };
+    int elem_bytes = shared_tensor->dtype.bytes();
+    int role = get_gemm_role(shared_tensor); // 0->A, 1->B, 2->C
+    if (elem_bytes == 1) {
+      desc.swizzle = static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B16);
+    } else if (elem_bytes == 2 && role != -1) {
+      desc.swizzle = role == 1
+                         ? static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B32)
+                         : static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B16);
+    } else {
+       LOG(WARNING) << src->name << " use elem_bytes " << elem_bytes << ", matrix role " << role;
+    }
+  }
+
   auto inner_box_dim = as_const_int(desc.smem_box[0]);
   ICHECK(inner_box_dim != nullptr);
   int instruction_dim = *inner_box_dim;
-  if (desc.swizzle == static_cast<int>(CU_TENSOR_MAP_SWIZZLE_64B)) {
-    instruction_dim = 64 / src->dtype.bytes();
-  } else if (desc.swizzle == static_cast<int>(CU_TENSOR_MAP_SWIZZLE_128B)) {
-    instruction_dim = 128 / src->dtype.bytes();
+  if (!TargetIsMusa(T.target)) {
+    if (desc.swizzle == static_cast<int>(CU_TENSOR_MAP_SWIZZLE_64B)) {
+      instruction_dim = 64 / src->dtype.bytes();
+    } else if (desc.swizzle == static_cast<int>(CU_TENSOR_MAP_SWIZZLE_128B)) {
+      instruction_dim = 128 / src->dtype.bytes();
+    }
   }
   if (instruction_dim > 256) {
     // smem_box dim must be in [0, 256]
@@ -1604,17 +1628,19 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
     int swizzle;
     int max_dim;
   };
-  static const std::vector<SwizzleCheck> swizzle_checks = {
+  if (!TargetIsMusa(T.target)) {
+    static const std::vector<SwizzleCheck> swizzle_checks = {
       {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_32B), 32},
       {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_64B), 64},
       {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_128B), 128},
-  };
-  for (const auto &check : swizzle_checks) {
-    if (desc.swizzle == check.swizzle && inner_box_dim_ > check.max_dim) {
-      LOG(WARNING) << "TMA bulk copy cannot support a swizzled global layout "
-                      "with inner_box_dim_ > "
-                   << check.max_dim << ", will be fallback to normal copy";
-      return LowerNormalCopy(T, analyzer);
+    };
+    for (const auto &check : swizzle_checks) {
+      if (desc.swizzle == check.swizzle && inner_box_dim_ > check.max_dim) {
+        LOG(WARNING) << "TMA bulk copy cannot support a swizzled global layout "
+                        "with inner_box_dim_ > "
+                    << check.max_dim << ", will be fallback to normal copy";
+        return LowerNormalCopy(T, analyzer);
+      }
     }
   }
 
