@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "../op/builtin.h"
+#include "../op/gemm.h"
 #include "./ptx.h"
 #include "arith/pattern_match.h"
 #include "tvm/node/cast.h"
@@ -2737,6 +2738,16 @@ void CodeGenTileLangMUSA::VisitStmt_(const AttrStmtNode *op) {
     ICHECK(pattern);
     this->stream << "const dim3 blockIdx = " << pattern->value << "();\n";
     this->VisitStmt(op->body);
+    return;
+  } else if (op->attr_key == tl::kGemmInst) {
+    this->VisitStmt(op->body);
+
+    const auto *inst = op->value.as<IntImmNode>();
+    // todo: only emit this call in multi buffer pipeline
+    if (inst->value == static_cast<int>(tl::GemmInst::kSQMMA)) {
+      this->PrintIndent();
+      this->stream << "__musa_sqmma_wait();\n";
+    }
     return;
   }
   CodeGenC::VisitStmt_(op);

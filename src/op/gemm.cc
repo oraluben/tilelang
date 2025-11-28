@@ -572,7 +572,7 @@ Stmt GemmNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
   auto new_call = Call(DataType::Handle(), tl::tl_gemm(),
                        Array<PrimExpr>{StringImm(ss.str()), Aptr, Bptr, Cptr});
 
-  return Evaluate(new_call);
+  return AttrStmt(Integer(0), tl::kGemmInst, Integer(static_cast<int>(gemm_inst)), Evaluate(new_call));
 }
 
 /**

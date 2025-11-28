@@ -94,6 +94,8 @@ static constexpr const char *kForceLetInline = "tl.force_let_inline";
  */
 static constexpr const char *kDynamicAlignment = "tl.dynamic_alignment";
 
+static constexpr const char *kGemmInst = "tl.gemm_inst";
+
 /*!
  * \brief Get the type of the CUDA tensor map
  *
