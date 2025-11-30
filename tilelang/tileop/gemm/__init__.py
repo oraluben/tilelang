@@ -12,6 +12,7 @@ from .gemm_wgmma import GemmWGMMA
 from .gemm_tcgen05 import GemmTCGEN5
 from .gemm_mfma import GemmMFMA
 from .gemm_cutedsl import GemmCuTeDSL
+from .gemm_metal import GemmMetal
 from tilelang import _ffi_api
 from tilelang.utils.target import target_is_volta
 from tilelang.jit.adapter.utils import is_cutedsl_target
@@ -172,5 +173,7 @@ class GemmPy(Node, Scriptable):
             return GemmMFMA
         elif gemm_inst.is_tcgen5mma():
             raise NotImplementedError("TCGEN5MMA is not implemented")
+        elif gemm_inst.is_metal():
+            return GemmMetal
         else:
             raise ValueError(f"Unsupported GEMM instruction: {gemm_inst}")
