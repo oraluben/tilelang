@@ -355,7 +355,7 @@ std::string CodeGenTileLangMUSA::Finish() {
   // decl_stream << "#include <tl_templates/musa/reduce.h>\n";
   // decl_stream << "#include <tl_templates/musa/ldsm.h>\n";
   decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";
-  // decl_stream << "#include <tl_templates/musa/debug.h>\n";
+  decl_stream << "#include <tl_templates/musa/debug.h>\n";
 
   if (need_global_barrier_) {
     decl_stream << "__device__ unsigned " << vid_global_barrier_state_
