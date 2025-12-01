@@ -789,24 +789,59 @@ Layout makeGemmABLayoutHopper(int mat_stride, int mat_continuous,
               << ", element_size=" << element_size << ", k_inner=" << k_inner;
 }
 
-// MTGPU TODO
-Layout makeGemmABLayoutPH1(int mat_stride, int mat_continuous,
-                           int continuity, int element_size, bool k_inner) {
-  int vector_size = 128 / element_size;
+Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG, int SS, int SL) {
+  // row (当前元素行坐标)
+  // col (当前元素列坐标)
+  Var row = InputPlaceholder(0);
+  Var col = InputPlaceholder(1);
+  
+  // (row, col) -> addr
+  // addr (当前元素地址)
+  PrimExpr addr = (row * stride + col) * element_size;
+  
+  // addr -> (line_id, line_offset)
+  // line_id (当前元素的Swizzle Line ID)
+  // line_offset (当前元素在当前Swizzle Line中的偏移)
+  PrimExpr line_id = FloorDiv(addr, SL);
+  PrimExpr line_offset = FloorMod(addr, SL);
 
-  if (mat_continuous % (vector_size * 8) == 0)
-    return makeFullBankSwizzleLayout(mat_stride, mat_continuous, element_size);
-  else if (mat_continuous % (vector_size * 4) == 0)
-    return makeHalfBankSwizzleLayout(mat_stride, mat_continuous, element_size);
-  else if (mat_continuous % (vector_size * 2) == 0)
-    return makeQuarterBankSwizzleLayout(mat_stride, mat_continuous,
-                                        element_size);
-  else if (mat_continuous % vector_size == 0)
-    return makeGemmLayoutLinear(mat_stride, mat_continuous);
-  else
-    ICHECK(0) << "Unsupported layout for Hopper with stride=" << mat_stride
+  // sg_per_sl (一个Swizzle Line包含的Swizzle Granularity个数)
+  PrimExpr sg_per_sl = FloorDiv(SL, SG);
+
+  // cycle_line_id (一个swizzle周期内的Swizzle Line Id)
+  PrimExpr cycle_line_id = FloorMod(line_id, sg_per_sl);
+
+  // line_offset -> (sg_id, sg_offset)
+  // sg_id (当前元素在当前Swizzle Line中的Swizzle Granularity ID)
+  // sg_offset (当前元素在当前Swizzle Granularity内的偏移)
+  PrimExpr sg_id = FloorDiv(line_offset, SG);
+  PrimExpr sg_offset = FloorMod(line_offset, SG);
+
+  // target_sg_id (当前元素Swizzle后对应的sg_id)
+  PrimExpr target_sg_id = sg_id ^ cycle_line_id;
+  // target_line_offset (当前元素Swizzle后的line_offset)
+  PrimExpr target_line_offset = target_sg_id * SG + sg_offset;
+  // target_addr (当前元素Swizzle后的addr)
+  PrimExpr target_addr = line_id * SL + target_line_offset;
+
+  PrimExpr i = FloorDiv(target_addr, stride * element_size);
+  PrimExpr j = FloorDiv(FloorMod(target_addr, stride * element_size), element_size);
+  return Layout(Array<PrimExpr>{stride, continuous}, {i, j});
+}
+
+Layout makeGemmABLayoutPH1(int mat_stride, int mat_continuous, int continuity,
+                           int element_size, bool k_inner) {
+  int SG = 0, SS = 256, SL = 256;
+  if (element_size == 8 || (element_size == 16 && k_inner)) {
+    SG = 16;
+  } else if (element_size == 16 && !k_inner) {
+    SG = 32;
+  } else {
+    ICHECK(0) << "Unsupported layout for PH1 with stride=" << mat_stride
               << ", continuous=" << mat_continuous
               << ", element_size=" << element_size << ", k_inner=" << k_inner;
+  }
+  return makeGemmABSwizzlePH1(mat_stride, mat_continuous, element_size / 8, SG, SS, SL);
 }
 
 Layout makeGemmABLayoutSm100(int mat_stride, int mat_continuous, int continuity,

@@ -130,6 +130,8 @@ class LibraryGenerator:
                 # "-lmusa",
                 f"--offload-arch=mp_{target_arch}",
                 "-I" + MUTLASS_INCLUDE_DIR,
+                "-mllvm",
+                "-mtgpu-alloc-shared-memory-from-zero=1"
             ]
 
         elif is_hip_target(target):

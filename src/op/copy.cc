@@ -1540,7 +1540,7 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
     desc.swizzle = static_cast<int>(CU_TENSOR_MAP_SWIZZLE_NONE);
   } else if (StructuralEqual()(shared_layout, linear_layout)) {
     desc.swizzle = static_cast<int>(CU_TENSOR_MAP_SWIZZLE_NONE);
-  } else {
+  } else if(!TargetIsMusa(T.target)){
     ICHECK(shared_layout->InputDim() == 2) << "Cannot detect TMA layout.";
     auto stride = as_const_int(shared_layout->InputShape()[0]);
     auto continuous = as_const_int(shared_layout->InputShape()[1]);
