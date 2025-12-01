@@ -5,7 +5,7 @@ import random
 import torch
 import numpy as np
 from tilelang.contrib import nvcc
-from tvm.testing.utils import (requires_cuda, requires_package, requires_llvm, requires_metal,
+from tvm.testing.utils import (requires_cuda, requires_musa, requires_package, requires_llvm, requires_metal,
                                requires_rocm, _compose)
 
 from tilelang.utils.tensor import torch_assert_close as torch_assert_close
@@ -13,6 +13,7 @@ from tilelang.utils.tensor import torch_assert_close as torch_assert_close
 __all__ = [
     'requires_package',
     'requires_cuda',
+    'requires_musa',
     'requires_metal',
     'requires_rocm',
     'requires_llvm',
@@ -33,6 +34,10 @@ def set_random_seed(seed: int = 42) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    try:
+        torch.musa.manual_seed_all(seed)
+    except:
+        pass
 
 
 def requires_cuda_compute_version(major_version, minor_version=0, mode="ge"):

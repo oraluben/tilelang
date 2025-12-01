@@ -9,15 +9,23 @@ BF16 = "bfloat16"
 FP32 = "float32"
 
 
-@tilelang.jit
+pass_configs = {
+    tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
+    tilelang.PassConfigKey.TL_DISABLE_TMA_LOWER: True,
+    tilelang.PassConfigKey.TL_DISABLE_FAST_MATH: True,
+}
+
+tilelang.disable_cache()
+
+@tilelang.jit(target="musa", pass_configs=pass_configs)
 def fp8_gemm_kernel(N, K, out_dtype=BF16, accum_dtype="float32"):
     assert out_dtype in [BF16, "float32"]
 
     M = T.symbolic("M")
     group_size = 128
     block_M = 32
-    block_N = 128
-    block_K = 128
+    block_N = 32
+    block_K = 32
 
     @T.prim_func
     def fp8_gemm_kernel_(
@@ -39,7 +47,7 @@ def fp8_gemm_kernel(N, K, out_dtype=BF16, accum_dtype="float32"):
             C_local_accum = T.alloc_fragment((block_M, block_N), accum_dtype)
 
             # Improve L2 Cache
-            T.use_swizzle(panel_size=10)
+            # T.use_swizzle(panel_size=10)
 
             T.clear(C_local)
             T.clear(C_local_accum)
@@ -86,25 +94,28 @@ def fp8_gemm(
     K = a.size(-1)
     M = a.numel() // K
     N = b.size(0)
-    c = a.new_empty(*a.size()[:-1], N, dtype=torch.get_default_dtype())
+    c = a.new_empty(*a.size()[:-1], N, dtype=torch.bfloat16)
     kernel = fp8_gemm_kernel(N, K)
     kernel(a.view(M, K), b, c.view(M, N), a_s.view(M, -1), b_s)
     return c
 
+M, N, K = 128, 128, 128
+kernel = fp8_gemm_kernel(N, K)
+print(kernel.get_kernel_source())
 
-device = "musa"
-M, N, K = 64, 128, 128
-group_size = 128
-A_fp32 = torch.randn(M, K, device=device, dtype=torch.float32)
-B_fp32 = torch.randn(N, K, device=device, dtype=torch.float32)
-A_fp8 = A_fp32.to(torch.float8_e4m3fn)
-B_fp8 = B_fp32.to(torch.float8_e4m3fn)
-def ceildiv(a, b):
-    return (a + b - 1) // b
-num_k_groups = ceildiv(K, group_size)
-num_n_groups = ceildiv(N, group_size)
-a_s = torch.ones(M, num_k_groups, device=device, dtype=torch.float32)
-b_s = torch.ones(num_n_groups, num_k_groups, device=device, dtype=torch.float32)
-C = fp8_gemm(A_fp8, a_s, B_fp8, b_s)
-print("C shape:", C.shape)
-print("C dtype:", C.dtype)
+# device = "musa"
+# M, N, K = 64, 128, 128
+# group_size = 128
+# A_fp32 = torch.randn(M, K, device=device, dtype=torch.float32)
+# B_fp32 = torch.randn(N, K, device=device, dtype=torch.float32)
+# A_fp8 = A_fp32.to(torch.float8_e4m3fn)
+# B_fp8 = B_fp32.to(torch.float8_e4m3fn)
+# def ceildiv(a, b):
+#     return (a + b - 1) // b
+# num_k_groups = ceildiv(K, group_size)
+# num_n_groups = ceildiv(N, group_size)
+# a_s = torch.ones(M, num_k_groups, device=device, dtype=torch.float32)
+# b_s = torch.ones(num_n_groups, num_k_groups, device=device, dtype=torch.float32)
+# C = fp8_gemm(A_fp8, a_s, B_fp8, b_s)
+# print("C shape:", C.shape)
+# print("C dtype:", C.dtype)
