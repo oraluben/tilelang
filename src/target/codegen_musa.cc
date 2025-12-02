@@ -352,7 +352,7 @@ std::string CodeGenTileLangMUSA::Finish() {
   // }
   decl_stream << "#include <tl_templates/musa/copy.h>\n";
   decl_stream << "#include <tl_templates/musa/barrier.h>\n";
-  // decl_stream << "#include <tl_templates/musa/reduce.h>\n";
+  decl_stream << "#include <tl_templates/musa/reduce.h>\n";
   // decl_stream << "#include <tl_templates/musa/ldsm.h>\n";
   decl_stream << "#include <tl_templates/musa/threadblock_swizzle.h>\n";
   decl_stream << "#include <tl_templates/musa/debug.h>\n";
