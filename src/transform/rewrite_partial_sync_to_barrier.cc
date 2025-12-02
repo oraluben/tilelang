@@ -186,9 +186,6 @@ PrimFunc RewritePartialSyncToBarrier(PrimFunc f) {
     return f;
   }
 
-  std::cout << "[sync] " << prepass.sync_count() << "\n";
-  std::cout << "[partial_syncs] " << prepass.partial_syncs().size() << "\n";
-
   std::vector<std::pair<int, PrimExpr>> syncs(prepass.partial_syncs().begin(),
                                               prepass.partial_syncs().end());
   std::sort(syncs.begin(), syncs.end(), [](const auto &lhs, const auto &rhs) {
@@ -202,7 +199,6 @@ PrimFunc RewritePartialSyncToBarrier(PrimFunc f) {
   for (const auto &[offset, thread_count] : syncs) {
     barrier_inits.push_back({base_count + offset, thread_count});
   }
-  std::cout << "[barrier_inits] " << barrier_inits.size() << "\n";
 
   MbarrierSyncRewriter rewriter(base_count, std::move(barrier_inits));
   body = rewriter(std::move(body));

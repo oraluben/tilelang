@@ -7,6 +7,14 @@ FP8 = "float8_e4m3"
 BF16 = "bfloat16"
 FP32 = "float32"
 
+pass_configs = {
+    tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
+    tilelang.PassConfigKey.TL_DISABLE_TMA_LOWER: True,
+    tilelang.PassConfigKey.TL_DISABLE_FAST_MATH: True,
+}
+
+tilelang.disable_cache()
+
 
 def fast_log2_ceil(x):
     bits_x = T.reinterpret("uint32", x)
@@ -24,7 +32,7 @@ def fast_round_scale(amax, fp8_max_inv):
     return fast_pow2(fast_log2_ceil(amax * fp8_max_inv))
 
 
-@tilelang.jit
+@tilelang.jit(target="musa", pass_configs=pass_configs)
 def act_quant_kernel(
     N, in_dtype=BF16, out_dtype=FP8, scale_dtype=FP32, round_scale=False
 ):
@@ -75,6 +83,37 @@ def act_quant_kernel(
     return act_quant_kernel_
 
 
+def act_quant_torch(x: torch.Tensor,
+                    block_size: int = 128,
+                    round_scale: bool = False,
+                    fp8_min: float = -448.0,
+                    fp8_max: float = 448.0):
+    assert x.is_contiguous(), "Input must be contiguous"
+    assert x.shape[-1] % block_size == 0, "Last dim must be divisible by block_size"
+
+    orig_shape = x.shape
+    N = x.shape[-1]
+    M = x.numel() // N
+    x2d = x.view(M, N)
+
+    n_groups = N // block_size
+    x_blocks = x2d.view(M, n_groups, block_size).to(torch.float32)
+    amax = x_blocks.abs().amax(dim=-1).clamp(min=1e-4)
+
+    inv_max = 1.0 / fp8_max
+    if round_scale:
+        scale = torch.pow(2.0, torch.ceil(torch.log2(amax * inv_max)))
+    else:
+        scale = amax * inv_max
+    scale = scale.to(torch.float32)  # (M, n_groups)
+
+    y_blocks = torch.clamp(x_blocks / scale.unsqueeze(-1), fp8_min, fp8_max)
+    y = y_blocks.to(torch.float8_e4m3fn).view(*orig_shape)
+    s = scale.view(*orig_shape[:-1], n_groups)
+
+    return y, s
+
+
 def act_quant(
     x: torch.Tensor, block_size: int = 128, scale_fmt: Optional[str] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -97,11 +136,12 @@ def act_quant(
     y = torch.empty_like(x, dtype=torch.float8_e4m3fn)
     s = x.new_empty(*x.size()[:-1], N // block_size, dtype=torch.float32)
     kernel = act_quant_kernel(N, round_scale=scale_fmt is not None)
+    print(kernel.get_kernel_source())
     kernel(x.view(-1, N), y.view(-1, N), s.view(-1, N // block_size))
     return y, s
 
 
-batch_size = 4
+batch_size = 32
 hidden_dim = 1024
 device = "musa"
 x = torch.randn(batch_size, hidden_dim, dtype=torch.bfloat16, device=device)
@@ -114,12 +154,15 @@ print("s dtype:", s.dtype, "shape:", s.shape)
 
 assert s.shape == (batch_size, hidden_dim // 128)
 
-sample_idx = 0
-group_idx = 0
-scale_0 = s[sample_idx, group_idx].item()
-x_block = x[sample_idx, group_idx * 128 : (group_idx + 1) * 128]
-y_block = y[sample_idx, group_idx * 128 : (group_idx + 1) * 128]
+print(y)
+print(s)
 
-print(f"scale[0,0] = {scale_0}")
-print("x_block max abs:", x_block.abs().max().item())
-print("y_block min/max:", y_block.min().item(), y_block.max().item())
+
+
+y_ref, s_ref = act_quant_torch(x, block_size=128, round_scale=False)
+
+print(y_ref)
+print(s_ref)
+
+torch.testing.assert_close(y.float(), y_ref.float(), rtol=0, atol=0)
+torch.testing.assert_close(s, s_ref, rtol=1e-2, atol=1e-2)

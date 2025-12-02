@@ -96,26 +96,22 @@ def fp8_gemm(
     N = b.size(0)
     c = a.new_empty(*a.size()[:-1], N, dtype=torch.bfloat16)
     kernel = fp8_gemm_kernel(N, K)
+    print(kernel.get_kernel_source())
     kernel(a.view(M, K), b, c.view(M, N), a_s.view(M, -1), b_s)
     return c
 
+device = "musa"
 M, N, K = 128, 128, 128
-kernel = fp8_gemm_kernel(N, K)
-print(kernel.get_kernel_source())
-
-# device = "musa"
-# M, N, K = 64, 128, 128
-# group_size = 128
-# A_fp32 = torch.randn(M, K, device=device, dtype=torch.float32)
-# B_fp32 = torch.randn(N, K, device=device, dtype=torch.float32)
-# A_fp8 = A_fp32.to(torch.float8_e4m3fn)
-# B_fp8 = B_fp32.to(torch.float8_e4m3fn)
-# def ceildiv(a, b):
-#     return (a + b - 1) // b
-# num_k_groups = ceildiv(K, group_size)
-# num_n_groups = ceildiv(N, group_size)
-# a_s = torch.ones(M, num_k_groups, device=device, dtype=torch.float32)
-# b_s = torch.ones(num_n_groups, num_k_groups, device=device, dtype=torch.float32)
-# C = fp8_gemm(A_fp8, a_s, B_fp8, b_s)
-# print("C shape:", C.shape)
-# print("C dtype:", C.dtype)
+group_size = 128
+A_fp32 = torch.randn(M, K, device=device, dtype=torch.float32)
+B_fp32 = torch.randn(N, K, device=device, dtype=torch.float32)
+A_fp8 = A_fp32.to(torch.float8_e4m3fn)
+B_fp8 = B_fp32.to(torch.float8_e4m3fn)
+def ceildiv(a, b):
+    return (a + b - 1) // b
+num_k_groups = ceildiv(K, group_size)
+num_n_groups = ceildiv(N, group_size)
+a_s = torch.ones(M, num_k_groups, device=device, dtype=torch.float32)
+b_s = torch.ones(num_n_groups, num_k_groups, device=device, dtype=torch.float32)
+C = fp8_gemm(A_fp8, a_s, B_fp8, b_s)
+print(C)
