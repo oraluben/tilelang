@@ -3,11 +3,13 @@
  * \brief Rewrite partial shared sync into mbarrier arrive/wait for MUSA.
  */
 #include "../op/builtin.h"
+#include "tvm/runtime/logging.h"
 #include "tvm/tir/builtin.h"
 #include "tvm/tir/expr.h"
 #include "tvm/tir/op.h"
 #include "tvm/tir/stmt_functor.h"
 #include "tvm/tir/transform.h"
+#include <iostream>
 #include <tvm/ffi/reflection/registry.h>
 
 #include <algorithm>
@@ -21,38 +23,49 @@ namespace tl {
 
 using namespace tir;
 
-class PartialSyncCollector : public StmtExprVisitor {
+// Collect all barrier in IR and rewrite partial sync to musa_sync placeholders.
+class PartialSyncPrepass : public StmtExprMutator {
 public:
-  void VisitStmt_(const EvaluateNode *op) final {
+  Stmt VisitStmt_(const EvaluateNode *op) final {
     if (const auto *call = op->value.as<CallNode>()) {
       if (call->op.same_as(builtin::tvm_storage_sync())) {
-        HandleStorageSync(call);
+        // rewrite partial thread sync IR from `tvm_storage_sync("shared.dyn",
+        // barrier_id, count)` to `musa_sync(offset, count)`
+        if (auto rewritten = RewriteStorageSync(call)) {
+          return rewritten.value();
+        }
       } else if (call->op.same_as(builtin::create_barriers())) {
+        // collect barrier count from `T.create_barriers(barrier_count)`
         HandleCreateBarriers(call);
       }
     }
-    StmtExprVisitor::VisitStmt_(op);
+    return StmtExprMutator::VisitStmt_(op);
   }
-
 
   const std::unordered_map<int, PrimExpr> &partial_syncs() const {
     return partial_syncs_;
   }
   int barrier_count() const { return barrier_count_; }
+  int sync_count() const { return sync_count_; }
 
 private:
-  void HandleStorageSync(const CallNode *call) {
-    if (call->args.size() != 3)
-      return;
+  std::optional<Stmt> RewriteStorageSync(const CallNode *call) {
+    if (call->args.size() != 3) {
+      return std::nullopt;
+    }
     const auto *scope = call->args[0].as<StringImmNode>();
-    if (!scope)
-      return;
-    if (scope->value != "shared" && scope->value != "shared.dyn")
-      return;
-    const auto *barrier_id = call->args[1].as<IntImmNode>();
-    if (!barrier_id)
-      return;
-    partial_syncs_[static_cast<int>(barrier_id->value)] = call->args[2];
+    if (!scope) {
+      return std::nullopt;
+    }
+    if (scope->value != "shared" && scope->value != "shared.dyn") {
+      return std::nullopt;
+    }
+    Array<PrimExpr> args = {IntImm(DataType::Int(32), sync_count_),
+                            VisitExpr(call->args[2])};
+    partial_syncs_[sync_count_] = call->args[2];
+    sync_count_++;
+    auto new_call = Call(call->dtype, musa_sync(), args);
+    return Evaluate(new_call);
   }
 
   void HandleCreateBarriers(const CallNode *call) {
@@ -65,21 +78,21 @@ private:
 
   std::unordered_map<int, PrimExpr> partial_syncs_;
   int barrier_count_{0};
+  int sync_count_{0};
 };
 
-class PartialSyncRewriter : public StmtExprMutator {
+class MbarrierSyncRewriter : public StmtExprMutator {
 public:
-  PartialSyncRewriter(std::unordered_map<int, int> id_remap,
-                      std::vector<std::pair<int, PrimExpr>> barrier_inits,
-                      int new_barrier_count)
-      : id_remap_(std::move(id_remap)),
-        barrier_inits_(std::move(barrier_inits)),
-        new_barrier_count_(new_barrier_count) {}
+  MbarrierSyncRewriter(int base_count,
+                       std::vector<std::pair<int, PrimExpr>> barrier_inits)
+      : base_count_(base_count), barrier_inits_(std::move(barrier_inits)) {
+    ICHECK(!barrier_inits_.empty());
+  }
 
   Stmt VisitStmt_(const EvaluateNode *op) final {
     if (const auto *call = op->value.as<CallNode>()) {
-      if (call->op.same_as(builtin::tvm_storage_sync())) {
-        if (auto rewritten = RewriteStorageSync(call)) {
+      if (call->op.same_as(tl::musa_sync())) {
+        if (auto rewritten = RewriteMusaSync(call)) {
           return rewritten.value();
         }
       } else if (call->op.same_as(builtin::create_barriers())) {
@@ -90,9 +103,10 @@ public:
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  // insert T.ptx_init_barrier_thread_count
   Stmt VisitStmt_(const IfThenElseNode *op) final {
-    if (!init_inserted_ && ShouldInsertInit(op->condition) &&
-        !barrier_inits_.empty()) {
+    // Find first tl_shuffle_elect
+    if (!init_inserted_ && ShouldInsertInit(op->condition)) {
       auto then_case = StmtExprMutator::VisitStmt(op->then_case);
       Array<Stmt> stmts = MakeInitStmts();
       stmts.push_back(then_case);
@@ -109,6 +123,7 @@ public:
 
   bool init_inserted() const { return init_inserted_; }
 
+  // Make statements for barrier inits
   Array<Stmt> MakeInitStmts() {
     Array<Stmt> stmts;
     for (const auto &[id, thread_count] : barrier_inits_) {
@@ -124,28 +139,18 @@ public:
   }
 
 private:
-  std::optional<Stmt> RewriteStorageSync(const CallNode *call) {
-    if (call->args.size() != 3)
-      return std::nullopt;
-    const auto *scope = call->args[0].as<StringImmNode>();
-    if (!scope || (scope->value != "shared" && scope->value != "shared.dyn"))
-      return std::nullopt;
-    const auto *barrier_id = call->args[1].as<IntImmNode>();
-    if (!barrier_id)
-      return std::nullopt;
-    auto it = id_remap_.find(static_cast<int>(barrier_id->value));
-    if (it == id_remap_.end())
-      return std::nullopt;
-    int new_id = it->second;
-    Array<PrimExpr> args = {
-        Call(DataType::Handle(), get_mbarrier(),
-             {IntImm(DataType::Int(32), new_id)}),
-        VisitExpr(call->args[2])};
+  // rewrite musa_sync
+  std::optional<Stmt> RewriteMusaSync(const CallNode *call) {
+    ICHECK_EQ(call->args.size(), 2);
+    auto offset = call->args[0].as<IntImmNode>()->value;
+    int new_id = base_count_ + offset;
+    Array<PrimExpr> args = {Call(DataType::Handle(), get_mbarrier(),
+                                 {IntImm(DataType::Int(32), new_id)}),
+                            VisitExpr(call->args[1])};
     auto new_call = Call(call->dtype, musa_sync(), args);
     return Evaluate(new_call);
   }
 
-  // todo: 修改成不需要找哪里可以插入 barrier init，而是创建一个块，插入 barrier init
   bool ShouldInsertInit(const PrimExpr &cond) {
     if (const auto *call = cond.as<CallNode>()) {
       if (call->op.same_as(tl_shuffle_elect()) && !call->args.empty()) {
@@ -165,48 +170,51 @@ private:
     return false;
   }
 
-  std::unordered_map<int, int> id_remap_;
   std::vector<std::pair<int, PrimExpr>> barrier_inits_;
-  int new_barrier_count_{0};
+  int base_count_{0};
   bool init_inserted_{false};
 };
 
 PrimFunc RewritePartialSyncToBarrier(PrimFunc f) {
-  PartialSyncCollector collector;
-  collector(f->body);
-  if (collector.partial_syncs().empty()) {
+  auto *n = f.CopyOnWrite();
+
+  PartialSyncPrepass prepass;
+  // Run prepass on a copy of the body so we can still early-return the
+  // untouched PrimFunc when there is no barrier to rewrite.
+  Stmt body = prepass(n->body);
+  if (prepass.sync_count() == 0) {
     return f;
   }
 
-  std::vector<std::pair<int, PrimExpr>> syncs(collector.partial_syncs().begin(),
-                                              collector.partial_syncs().end());
-  std::sort(syncs.begin(), syncs.end(),
-            [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
+  std::cout << "[sync] " << prepass.sync_count() << "\n";
+  std::cout << "[partial_syncs] " << prepass.partial_syncs().size() << "\n";
 
-  int base_count = collector.barrier_count();
+  std::vector<std::pair<int, PrimExpr>> syncs(prepass.partial_syncs().begin(),
+                                              prepass.partial_syncs().end());
+  std::sort(syncs.begin(), syncs.end(), [](const auto &lhs, const auto &rhs) {
+    return lhs.first < rhs.first;
+  });
 
-  std::unordered_map<int, int> id_remap;
+  int base_count = prepass.barrier_count();
+
   std::vector<std::pair<int, PrimExpr>> barrier_inits;
-  int next_barrier_id = base_count;
-  for (const auto &[old_id, thread_count] : syncs) {
-    id_remap[old_id] = next_barrier_id;
-    barrier_inits.push_back({next_barrier_id, thread_count});
-    ++next_barrier_id;
+  barrier_inits.reserve(syncs.size());
+  for (const auto &[offset, thread_count] : syncs) {
+    barrier_inits.push_back({base_count + offset, thread_count});
   }
-  int new_barrier_count = next_barrier_id;
+  std::cout << "[barrier_inits] " << barrier_inits.size() << "\n";
 
-  PartialSyncRewriter rewriter(std::move(id_remap), barrier_inits,
-                               new_barrier_count);
-  auto *n = f.CopyOnWrite();
-  Stmt body = rewriter(std::move(n->body));
+  MbarrierSyncRewriter rewriter(base_count, std::move(barrier_inits));
+  body = rewriter(std::move(body));
 
   Array<Stmt> prefix;
   // Always insert a fresh create_barriers with the new count.
-  auto create =
-      Evaluate(Call(DataType::Handle(), builtin::create_barriers(),
-                    {IntImm(DataType::Int(32), new_barrier_count)}));
+  int new_barrier_count = base_count + syncs.size();
+  auto create = Evaluate(Call(DataType::Handle(), builtin::create_barriers(),
+                              {IntImm(DataType::Int(32), new_barrier_count)}));
   prefix.push_back(create);
 
+  // If MbarrierSyncRewriter has not previously inserted barrier inits
   if (!rewriter.init_inserted()) {
     auto cond = Call(DataType::Bool(), tl_shuffle_elect(),
                      {IntImm(DataType::Int(32), 0)});
@@ -228,7 +236,7 @@ namespace transform {
 
 tvm::transform::Pass RewriteMUSAPartialSync() {
   auto pass_func = [](PrimFunc f, IRModule m,
-                     const tvm::transform::PassContext &ctx) {
+                      const tvm::transform::PassContext &ctx) {
     return RewritePartialSyncToBarrier(std::move(f));
   };
   return tir::transform::CreatePrimFuncPass(pass_func, 0,
