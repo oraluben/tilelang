@@ -797,7 +797,7 @@ Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG
   
   // (row, col) -> addr
   // addr (当前元素地址)
-  PrimExpr addr = (row * stride + col) * element_size;
+  PrimExpr addr = (row * continuous + col) * element_size;
   
   // addr -> (line_id, line_offset)
   // line_id (当前元素的Swizzle Line ID)
@@ -824,8 +824,8 @@ Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG
   // target_addr (当前元素Swizzle后的addr)
   PrimExpr target_addr = line_id * SL + target_line_offset;
 
-  PrimExpr i = FloorDiv(target_addr, stride * element_size);
-  PrimExpr j = FloorDiv(FloorMod(target_addr, stride * element_size), element_size);
+  PrimExpr i = FloorDiv(target_addr, continuous * element_size);
+  PrimExpr j = FloorDiv(FloorMod(target_addr, continuous * element_size), element_size);
   return Layout(Array<PrimExpr>{stride, continuous}, {i, j});
 }
 
