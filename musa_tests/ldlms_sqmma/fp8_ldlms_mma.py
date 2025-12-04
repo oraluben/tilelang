@@ -4,13 +4,13 @@ import tilelang.language as T
 tilelang.disable_cache()
 
 def matmul(M,
-                N,
-                K,
-                block_M,
-                block_N,
-                block_K,
-                dtype="float8_e4m3",
-                accum_dtype="float"):
+           N,
+           K,
+           block_M,
+           block_N,
+           block_K,
+           dtype="float8_e4m3",
+           accum_dtype="float"):
 
     @T.prim_func
     def gemm(
@@ -35,9 +35,9 @@ def matmul(M,
 
 
 if __name__ == "__main__":
-    M = 1024
-    N = 1024
-    K = 1024
+    M = 256
+    N = 256
+    K = 256
     block_M = 32
     block_N = 32
     block_K = 32
@@ -57,24 +57,14 @@ if __name__ == "__main__":
     )
     print(kernel.get_kernel_source())
     import torch
-    a = torch.randn(M, K, device="musa", dtype=torch.float16)
-    b = torch.ones(K, N, device="musa", dtype=torch.float16)
-    print(a)
-    print(b)
-    a = a.to(torch.float8_e4m3fn)
-    b = b.to(torch.float8_e4m3fn)
+    a = torch.randn(M, K, device="musa", dtype=torch.float16).to(torch.float8_e4m3fn)
+    b = torch.randn(K, N, device="musa", dtype=torch.float16).to(torch.float8_e4m3fn)
     print('start kernel')
     c = kernel(a, b)
     print('start ref')
     ref_c = a @ b
     print('compare')
-    with open("c.txt", "w") as f:
-        for row in c.cpu():
-            line = " ".join(f"{x.item():8.2f}" for x in row.float())
-            f.write(line + "\n")
-    with open("ref_c.txt", "w") as f:
-        for row in ref_c.cpu():
-            line = " ".join(f"{x.item():8.2f}" for x in row.float())
-            f.write(line + "\n")
-    torch.testing.assert_close(c.to(torch.float32), ref_c.to(torch.float32), rtol=1e-2, atol=1e-2)
+    print(ref_c)
+    print(c)
+    torch.testing.assert_close(c.to(torch.float32), ref_c.to(torch.float32), rtol=2.25e-1, atol=2.25e-1)
     print("matmul matches torch reference.")

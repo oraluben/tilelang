@@ -730,7 +730,7 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &T,
     const int64_t a_mat_continuous = *as_const_int(A->shape[dim_A - 1]);
     const int64_t a_continuity = trans_A ? 4 * a_mat_continuous / warp_m : a_mat_continuous;
     auto ALayout = makeGemmABLayoutPH1(a_mat_stride, a_mat_continuous, a_continuity,
-                                       A->dtype.bits(), !trans_A);
+                                       A->dtype.bits(), !trans_A, false);
     results.Set(A, ALayout);
 
     // B layout
@@ -739,7 +739,7 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &T,
     const int64_t b_mat_continuous = *as_const_int(B->shape[dim_B - 1]);
     const int64_t b_continuity = trans_B ? b_mat_continuous : b_mat_continuous / warp_n;
     auto BLayout = makeGemmABLayoutPH1(b_mat_stride, b_mat_continuous, b_continuity,
-                                       B->dtype.bits(), trans_B);
+                                       B->dtype.bits(), trans_B, true);
     results.Set(B, BLayout);
   } else if (gemm_inst == GemmInst::kTCGEN5MMA) {
     ICHECK(C.scope() == "shared.tmem")

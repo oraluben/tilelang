@@ -59,12 +59,12 @@ if __name__ == "__main__":
     import torch
     a = torch.randn(M, K, device="musa", dtype=torch.float16)
     b = torch.randn(K, N, device="musa", dtype=torch.float16)
-    print(a)
-    print(b)
     print('start kernel')
     c = kernel(a, b)
     print('start ref')
     ref_c = a @ b
     print('compare')
+    print(ref_c)
+    print(c)
     torch.testing.assert_close(c.to(torch.float32), ref_c.to(torch.float32), rtol=1e-2, atol=1e-2)
     print("matmul matches torch reference.")

@@ -55,6 +55,8 @@ if __name__ == "__main__":
     print('start ref')
     ref_c = a @ b
     print('compare')
+    print(ref_c)
+    print(c)
     torch.testing.assert_close(c.to(torch.float32), ref_c.to(torch.float32), rtol=1e-2, atol=1e-2)
     print("matmul matches torch reference.")
 
