@@ -200,8 +200,6 @@ Fragment makeGemmFragmentCPH1(const int block_m, const int block_n,
                               const int element_size) {
   ICHECK(warp_m == 4);
   ICHECK(warp_n == 1);
-  ICHECK(block_m == 128 || block_m == 32);
-  ICHECK(block_m == block_n);
   ICHECK(element_size == 32);
 
   auto warp_layout = makeGemmFragment4x8();
@@ -794,11 +792,11 @@ Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG
   // col (当前元素列坐标)
   Var row = InputPlaceholder(0);
   Var col = InputPlaceholder(1);
-  
+
   // (row, col) -> addr
   // addr (当前元素地址)
   PrimExpr addr = (row * continuous + col) * element_size;
-  
+
   // addr -> (line_id, line_offset)
   // line_id (当前元素的Swizzle Line ID)
   // line_offset (当前元素在当前Swizzle Line中的偏移)

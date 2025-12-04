@@ -85,11 +85,9 @@ public:
       tiled_mma.accumulate_ = mute::MP31::SQMMA::ScaleOut::Zero;
     }
 
-    // #pragma unroll
-
     for (int k_block = 0; k_block < size<2>(tCrA); ++k_block) {
       // (V,M) x (V,N) => (V,M,N)
-      gemm(tiled_mma, tCrA(_, _, _, k_block), tCrB(_, _, _, k_block), acc);
+      gemm(tiled_mma, tCrA(_, _, k_block, 0), tCrB(_, _, k_block, 0), acc);
       tiled_mma.accumulate_ = mute::MP31::SQMMA::ScaleOut::One;
     }
 
