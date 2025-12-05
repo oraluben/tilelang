@@ -395,6 +395,30 @@ private:
   bool has_tma_op_ = false;
 };
 
+class ProducerBarrierGuarder : public StmtMutator {
+public:
+  static Stmt Guard(Stmt stmt, PrimExpr guard) {
+    ProducerBarrierGuarder guarder(std::move(guard));
+    return guarder(std::move(stmt));
+  }
+
+private:
+  explicit ProducerBarrierGuarder(PrimExpr guard) : guard_(std::move(guard)) {}
+
+  Stmt VisitStmt_(const EvaluateNode *op) final {
+    if (const auto *call = op->value.as<CallNode>()) {
+      if (call->op.same_as(mbarrier_wait_parity()) ||
+          call->op.same_as(builtin::ptx_arrive_barrier())) {
+        auto eval = StmtMutator::VisitStmt_(op);
+        return IfThenElse(guard_, eval, std::nullopt);
+      }
+    }
+    return StmtMutator::VisitStmt_(op);
+  }
+
+  PrimExpr guard_;
+};
+
 Block MakeGroupBlock(const Stmt &stmt,
                      const Map<String, ObjectRef> &annotations) {
   Block block(/*iter_vars=*/{}, /*reads=*/{}, /*writes=*/{}, /*name_hint=*/"",
@@ -1116,14 +1140,15 @@ private:
 class WarpSpecializedRewriter : public StmtExprMutator {
 public:
   WarpSpecializedRewriter(bool disable_warp_specialized,
-                          bool disable_shuffle_elect,
-                          bool force_full_producer_arrive)
+                          bool disable_shuffle_elect, bool has_warp_arrive,
+                          bool single_warp_producer_barrier)
       : disable_warp_specialized_(disable_warp_specialized),
         disable_shuffle_elect_(disable_shuffle_elect),
-        force_full_producer_arrive_(force_full_producer_arrive) {}
+        has_warp_arrive_(has_warp_arrive),
+        single_warp_producer_barrier_(single_warp_producer_barrier) {}
   static PrimFunc Substitute(PrimFunc f, bool disable_warp_specialized,
-                             bool disable_shuffle_elect,
-                             bool force_full_producer_arrive) {
+                             bool disable_shuffle_elect, bool has_warp_arrive,
+                             bool single_warp_producer_barrier) {
     // Check if function only uses threadIdx.x before proceeding
     if (!ThreadTagChecker::HasOnlyThreadIdxX(f)) {
       LOG(WARNING) << "WarpSpecialize will be disabled because the program "
@@ -1134,9 +1159,9 @@ public:
       return f;
     }
 
-    auto T = WarpSpecializedRewriter(disable_warp_specialized,
-                                     disable_shuffle_elect,
-                                     force_full_producer_arrive);
+    auto T =
+        WarpSpecializedRewriter(disable_warp_specialized, disable_shuffle_elect,
+                                has_warp_arrive, single_warp_producer_barrier);
     T.buffer_lca_ = DetectBufferAccessLCA(f);
     for (auto [buffer, _] : T.buffer_lca_)
       T.buffer_data_to_buffer_.Set(buffer->data, buffer);
@@ -1225,8 +1250,16 @@ private:
     if (!marker.HasSimtCopy())
       producer_thread_extent = 128;
 
-    updated_thread_extent_ = consumer_thread_extent + producer_thread_extent;
+    // Guard for producer barrier
+    bool guard_producer_barrier =
+        single_warp_producer_barrier_ && !producer.hasSimtCopy();
+    if (guard_producer_barrier) {
+      auto guard =
+          Call(DataType::Bool(), tl_shuffle_elect(), {producer_thread_extent});
+      producer_code = ProducerBarrierGuarder::Guard(producer_code, guard);
+    }
 
+    updated_thread_extent_ = consumer_thread_extent + producer_thread_extent;
     producer_code = ThreadIdxRewriter::Rewrite(
         producer_code, thread_iv_->var,
         thread_iv_->var - consumer_thread_extent, producer_thread_extent,
@@ -1241,18 +1274,14 @@ private:
     int num_barriers = consumer.num_barriers_;
     Array<PrimExpr> barrier_num_threads;
     barrier_num_threads.reserve(num_barriers);
+    int one_arrive = has_warp_arrive_ ? 32 : 1;
+    PrimExpr producer_arrive_thread_count =
+        producer.hasSimtCopy() ? producer_thread_extent : one_arrive;
+
     for (int i = 0; i < num_barriers; i++) {
-      PrimExpr arrive_thread_count;
-      if (producer.released_barrier_.count(i)) {
-        if (!producer.hasSimtCopy() && force_full_producer_arrive_) {
-          arrive_thread_count = producer_thread_extent;
-        } else {
-          arrive_thread_count =
-              producer.hasSimtCopy() ? producer_thread_extent : 1;
-        }
-      } else {
-        arrive_thread_count = consumer_thread_extent;
-      }
+      PrimExpr arrive_thread_count = producer.released_barrier_.count(i)
+                                         ? producer_arrive_thread_count
+                                         : consumer_thread_extent;
       barrier_num_threads.push_back(arrive_thread_count);
     }
 
@@ -1280,7 +1309,8 @@ private:
   bool need_update_thread_extent_ = false;
   bool disable_warp_specialized_ = false;
   bool disable_shuffle_elect_ = false;
-  bool force_full_producer_arrive_{false};
+  bool has_warp_arrive_ = false;
+  bool single_warp_producer_barrier_ = false;
 };
 
 using namespace tir::transform;
@@ -1291,16 +1321,18 @@ tvm::transform::Pass WarpSpecialized() {
         ctx->GetConfig<Bool>(kDisableWarpSpecialized, Bool(false)).value();
     bool disable_shuffle_elect =
         ctx->GetConfig<Bool>(kDisableShuffleElect, Bool(false)).value();
+    bool has_warp_arrive = false;
+    bool single_warp_producer_barrier = false;
+    if (auto target = f->GetAttr<Target>(tvm::attr::kTarget)) {
+      has_warp_arrive = target.value()->kind->name == "musa";
+      single_warp_producer_barrier = target.value()->kind->name == "musa";
+    }
     bool warp_specialized = WarpSpecializedDetector::Detect(f->body);
 
     if (!warp_specialized) {
-      bool force_full_producer_arrive = false;
-      if (auto target = f->GetAttr<tvm::Target>(tvm::attr::kTarget)) {
-        force_full_producer_arrive = target.value()->kind->name == "musa";
-      }
       return WarpSpecializedRewriter::Substitute(
-          f, disable_warp_specialized, disable_shuffle_elect,
-          force_full_producer_arrive);
+          f, disable_warp_specialized, disable_shuffle_elect, has_warp_arrive,
+          single_warp_producer_barrier);
     } else {
       auto node = ffi::String("default");
       f.CopyOnWrite()->body =

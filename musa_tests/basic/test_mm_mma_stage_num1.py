@@ -87,7 +87,7 @@ SPECIAL_CASES = [
 
 TEST_CASES += [
     pytest.param(M, N, K, bm, bn, bk, dtype, acc_type,
-                 id=f"manual-M{M}-N{N}-K{K}-bm{bm}-bn{bn}-bk{bk}-{dtype}-{acc_type}")
+                 id=f"M{M}-N{N}-K{K}-bm{bm}-bn{bn}-bk{bk}-{dtype}-{acc_type}")
     for (M, N, K, bm, bn, bk, dtype, acc_type) in SPECIAL_CASES
 ]
 

@@ -80,6 +80,17 @@ TEST_CASES = [
     )
 ]
 
+SPECIAL_CASES = [
+    (1024, 1024, 1024, 32, 32, 32, "float16", "float32"),
+    (1024, 1024, 1024, 32, 32, 32, "bfloat16", "float32"),
+]
+
+TEST_CASES += [
+    pytest.param(M, N, K, bm, bn, bk, dtype, acc_type,
+                 id=f"M{M}-N{N}-K{K}-bm{bm}-bn{bn}-bk{bk}-{dtype}-{acc_type}")
+    for (M, N, K, bm, bn, bk, dtype, acc_type) in SPECIAL_CASES
+]
+
 
 @pytest.mark.parametrize(
     "M,N,K,bm,bn,bk,dtype,acc_type",
