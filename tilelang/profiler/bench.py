@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import sys
 from typing import Callable, Literal
-
+from tilelang.utils.device import synchronize, get_pt_device, GPUEvent, IS_MUSA
 import torch
 
 
@@ -55,9 +55,7 @@ class suppress_stdout_stderr:
         self.errnull_file.close()
 
 
-IS_CUDA = torch.cuda.is_available()
-device = 'cuda:0' if IS_CUDA else 'mps:0'
-Event = torch.cuda.Event if IS_CUDA else torch.mps.Event
+device = get_pt_device()
 
 
 def do_bench(
@@ -76,7 +74,7 @@ def do_bench(
     This function provides accurate GPU kernel timing by:
     - Clearing L2 cache between runs for consistent measurements
     - Auto-calculating warmup and repeat counts based on kernel runtime
-    - Supporting multiple profiling backends (CUDA events or CUPTI)
+    - Supporting multiple profiling backends (GPU events or CUPTI)
     - Offering flexible result aggregation (mean/median/min/max/quantiles)
 
     Args:
@@ -87,7 +85,7 @@ def do_bench(
         _n_repeat: Manual override for benchmark iterations (default: 0 = auto)
         quantiles: Performance percentiles to compute (e.g., [0.5, 0.95])
         fast_flush: Use faster L2 cache flush with int32 vs int8 (default: True)
-        backend: Profiler backend - "event" (CUDA events) or "cupti" (default: "event")
+        backend: Profiler backend - "event" (GPU events) or "cupti" (default: "event")
         return_mode: Result aggregation method - "mean", "median", "min", or "max"
 
     Returns:
@@ -98,17 +96,17 @@ def do_bench(
 
     # Initial function call and synchronization
     fn()
-    torch.cuda.synchronize()
+    synchronize()
 
     # Create L2 cache flush buffer (256 MB)
     # Fast flush uses int32 (4 bytes), regular uses int8 (1 byte)
     cache_size = int(256e6 // 4) if fast_flush else int(256e6)
     cache_dtype = torch.int if fast_flush else torch.int8
-    cache = torch.empty(cache_size, dtype=cache_dtype, device="cuda")
+    cache = torch.empty(cache_size, dtype=cache_dtype, device=device)
 
     # Estimate kernel runtime with 5 iterations
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = GPUEvent(enable_timing=True)
+    end_event = GPUEvent(enable_timing=True)
     start_event.record()
     for _ in range(5):
         cache.zero_()
@@ -128,24 +126,24 @@ def do_bench(
 
     # Benchmarking phase
     if backend == "event":
-        return _bench_with_cuda_events(fn, cache, n_repeat, quantiles, return_mode)
+        return _bench_with_gpu_events(fn, cache, n_repeat, quantiles, return_mode)
     elif backend == "cupti":
         return _bench_with_cupti(fn, cache, n_repeat)
     else:
         raise ValueError(f"Unknown profiler backend: {backend}")
 
 
-def _bench_with_cuda_events(
+def _bench_with_gpu_events(
     fn: Callable,
     cache: torch.Tensor,
     n_repeat: int,
     quantiles: list[float] | None,
     return_mode: str,
 ) -> float | list[float]:
-    """Benchmark using CUDA events for timing."""
+    """Benchmark using GPU events for timing."""
     # Create timing events
-    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
-    end_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
+    start_events = [GPUEvent(enable_timing=True) for _ in range(n_repeat)]
+    end_events = [GPUEvent(enable_timing=True) for _ in range(n_repeat)]
 
     # Run benchmark iterations
     for i in range(n_repeat):
@@ -155,7 +153,7 @@ def _bench_with_cuda_events(
         end_events[i].record()
 
     # Synchronize and collect timings
-    torch.cuda.synchronize()
+    synchronize()
     times = torch.tensor(
         [s.elapsed_time(e) for s, e in zip(start_events, end_events)],
         dtype=torch.float,
@@ -170,6 +168,14 @@ def _bench_with_cuda_events(
     return getattr(torch, return_mode)(times).item()
 
 
+def get_profiler_activities():
+    if IS_MUSA:
+        activities = [torch.profiler.ProfilerActivity.MUSA]
+    else:
+        activities = [torch.profiler.ProfilerActivity.CUDA]
+    return activities
+
+
 def _bench_with_cupti(
     fn: Callable,
     cache: torch.Tensor,
@@ -179,7 +185,7 @@ def _bench_with_cupti(
     with suppress_stdout_stderr():
         schedule = torch.profiler.schedule(wait=1, warmup=0, active=1, repeat=1)
         profiler = torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CUDA],
+            activities=get_profiler_activities(),
             schedule=schedule,
         )
 
@@ -191,14 +197,14 @@ def _bench_with_cupti(
                 profiler.step()
 
     # Calculate average kernel time, excluding cache-clearing overhead
-    total_cuda_time = 0.0
+    total_gpu_time = 0.0
     excluded_time = 0.0
     excluded_kernels = "at::native::vectorized_elementwise"
 
     for event in profiler.key_averages():
-        total_cuda_time += event.self_device_time_total
+        total_gpu_time += event.self_device_time_total
         if excluded_kernels in event.key:
             excluded_time += event.self_device_time_total
 
-    kernel_time_us = (total_cuda_time - excluded_time) / n_repeat
+    kernel_time_us = (total_gpu_time - excluded_time) / n_repeat
     return kernel_time_us * 1e-3  # Convert microseconds to milliseconds

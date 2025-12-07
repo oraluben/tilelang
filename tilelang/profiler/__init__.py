@@ -16,6 +16,7 @@ from tilelang.utils.tensor import (
 from tilelang.engine.param import KernelParam
 from tilelang.jit.adapter import BaseKernelAdapter
 from tilelang.profiler.bench import do_bench
+from tilelang.utils.device import synchronize, get_dl_device
 
 
 @dataclass
@@ -93,9 +94,9 @@ class Profiler:
         """
         ins = self._get_inputs() if input_tensors is None else input_tensors
         ref_outs = reference_program(*ins)
-        torch.cuda.synchronize()
+        synchronize()
         lib_outs = self.func(*ins)
-        torch.cuda.synchronize()
+        synchronize()
 
         if isinstance(lib_outs, torch.Tensor):
             lib_outs = [lib_outs]
@@ -162,9 +163,9 @@ class Profiler:
         """
         ins = self._get_inputs() if input_tensors is None else input_tensors
         ref_outs = reference_program(*ins)
-        torch.cuda.synchronize()
+        synchronize()
         lib_outs = self.func(*ins)
-        torch.cuda.synchronize()
+        synchronize()
 
         if isinstance(lib_outs, torch.Tensor):
             lib_outs = [lib_outs]
@@ -270,9 +271,8 @@ class Profiler:
             with suppress(Exception):
                 target = self.mod.imported_modules[0].type_key
 
-            assert target in ["cuda", "hip"], f"Unknown target: {target}"
-
-            device = tvm.cuda(0) if target == "cuda" else tvm.rocm(0)
+            assert target in ["cuda", "musa", "hip"], f"Unknown target: {target}"
+            device = get_dl_device(target)
             time_evaluator = self.mod.time_evaluator(
                 self.mod.entry_name, device, number=rep, repeat=n_repeat)
             tvm_inputs = [adapt_torch2tvm(inp) for inp in ins]
