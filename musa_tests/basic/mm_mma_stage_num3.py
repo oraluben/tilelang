@@ -2,8 +2,7 @@ import argparse
 import tilelang
 import tilelang.language as T
 import torch
-
-tilelang.disable_cache()
+from tilelang.utils.tensor import map_torch_type
 
 TARGET = "musa"
 DEVICE = "musa"
@@ -23,6 +22,7 @@ def matmul(M, N, K, block_M, block_N, block_K, dtype="float16", accum_dtype="flo
         ):
             A_shared = T.alloc_shared((block_M, block_K), dtype)
             B_shared = T.alloc_shared((block_K, block_N), dtype)
+            C_shared = T.alloc_shared((block_M, block_N), dtype)
             C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
 
             T.clear(C_local)
@@ -31,6 +31,7 @@ def matmul(M, N, K, block_M, block_N, block_K, dtype="float16", accum_dtype="flo
                 T.copy(B[k * block_K, bx * block_N], B_shared)
                 T.gemm(A_shared, B_shared, C_local)
 
+            T.copy(C_local, C_shared)
             T.copy(C_local, C[by * block_M, bx * block_N])
 
     return matmul_kernel
@@ -51,13 +52,21 @@ def run(M, N, K, bm, bn, bk, dtype, acc_type, verbose):
     if verbose:
         print(kernel.get_kernel_source())
 
-    a = torch.randn(M, K, device=DEVICE, dtype=getattr(torch, dtype))
-    b = torch.randn(K, N, device=DEVICE, dtype=getattr(torch, dtype))
+    pt_type = map_torch_type(dtype)
+    if pt_type is torch.float8_e4m3fn:
+        a = torch.randint(low=-128, high=128, size=(M, K), device=DEVICE, dtype=torch.int8).to(pt_type)
+        b = torch.randint(low=-128, high=128, size=(K, N), device=DEVICE, dtype=torch.int8).to(pt_type)
+    else:
+        a = torch.randn(M, K, device=DEVICE, dtype=pt_type)
+        b = torch.randn(K, N, device=DEVICE, dtype=pt_type)
     if verbose:
         print("start kernel")
     c = kernel(a, b)
     ref_c = a @ b
-    torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
+    if pt_type is torch.float8_e4m3fn:
+        torch.testing.assert_close(c.float(), ref_c.float(), rtol=1e-2, atol=1e-2)
+    else:
+        torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
     if verbose:
         print("tilelang kernel matches torch reference.")
 
@@ -82,4 +91,5 @@ def main():
 
 
 if __name__ == "__main__":
+    tilelang.disable_cache()
     main()
