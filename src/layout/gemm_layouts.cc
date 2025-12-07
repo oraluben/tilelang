@@ -787,7 +787,7 @@ Layout makeGemmABLayoutHopper(int mat_stride, int mat_continuous,
               << ", element_size=" << element_size << ", k_inner=" << k_inner;
 }
 
-Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG, int SS, int SL, bool isB) {
+Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG, int SS, int SL) {
   // row (当前元素行坐标)
   // col (当前元素列坐标)
   Var row = InputPlaceholder(0);
@@ -808,9 +808,6 @@ Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG
 
   // cycle_line_id (一个swizzle周期内的Swizzle Line Id)
   PrimExpr cycle_line_id = FloorMod(line_id, sg_per_sl);
-  if (isB && element_size == 1 && stride == 32 && continuous == 32) {
-    cycle_line_id = cycle_line_id + 4;
-  }
 
   // line_offset -> (sg_id, sg_offset)
   // sg_id (当前元素在当前Swizzle Line中的Swizzle Granularity ID)
@@ -831,7 +828,7 @@ Layout makeGemmABSwizzlePH1(int stride, int continuous, int element_size, int SG
 }
 
 Layout makeGemmABLayoutPH1(int mat_stride, int mat_continuous, int continuity,
-                           int element_size, bool k_inner, bool isB) {
+                           int element_size, bool k_inner) {
   int SG = 0, SS = 256, SL = 256;
   if (element_size == 8 || (element_size == 16 && k_inner)) {
     SG = 16;
@@ -842,7 +839,7 @@ Layout makeGemmABLayoutPH1(int mat_stride, int mat_continuous, int continuity,
               << ", continuous=" << mat_continuous
               << ", element_size=" << element_size << ", k_inner=" << k_inner;
   }
-  return makeGemmABSwizzlePH1(mat_stride, mat_continuous, element_size / 8, SG, SS, SL, isB);
+  return makeGemmABSwizzlePH1(mat_stride, mat_continuous, element_size / 8, SG, SS, SL);
 }
 
 Layout makeGemmABLayoutSm100(int mat_stride, int mat_continuous, int continuity,

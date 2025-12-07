@@ -42,6 +42,7 @@
 #include <utility>
 
 #include "../op/builtin.h"
+#include "../op/gemm.h"
 #include "../target/utils.h"
 #include "runtime/thread_storage_scope.h"
 #include "tir/transforms/ir_utils.h"
@@ -362,7 +363,9 @@ private:
       // These intrinsics introduce stricter SMEM alignment requirements; mark
       // the subtree.
       under_alignment_scope_ = true;
+      setSwizzleCycle_(op);
       StmtExprVisitor::VisitExpr_(op);
+      clearSwizzleCycle_();
       under_alignment_scope_ = false;
     } else {
       StmtExprVisitor::VisitExpr_(op);
@@ -376,14 +379,30 @@ private:
       if (scope == "shared" || scope == "shared.dyn") {
         auto target = Target::Current();
         ICHECK(target.defined()) << "Target is not defined";
-        const int alignment = TargetIsHopper(target) ? 1024 : 16;
+        int alignment = TargetIsHopper(target) ? 1024 : 16;
+        if (swizzle_cycle_) {
+          alignment = swizzle_cycle_;
+        }
         shmem_alignment_map_[op] = alignment;
       }
     }
     StmtExprVisitor::VisitExpr_(op);
   }
 
+  void setSwizzleCycle_(const CallNode *op) {
+    if (TargetIsPH1(Target::Current()) && op->op.same_as(tl::tl_gemm()) &&
+        tvm::transform::PassContext::Current()->GetConfig<Bool>(
+          kDisableTMALower, Bool(false)).value()) {
+      swizzle_cycle_ = 4096;
+    }
+  }
+
+  void clearSwizzleCycle_() {
+    swizzle_cycle_ = 0;
+  }
+
   bool under_alignment_scope_{false};
+  int swizzle_cycle_{0};
 
   std::unordered_map<const VarNode *, int> shmem_alignment_map_;
 };

@@ -23,8 +23,8 @@ def fp8_index_kernel(h: int, d: int):
     m = T.symbolic("m")
     n = T.symbolic("n")
 
-    blk_n1 = 512
-    blk_n2 = 128
+    blk_n1 = 64
+    blk_n2 = 32
 
     @T.prim_func
     def fp8_index_kernel_(
@@ -41,7 +41,7 @@ def fp8_index_kernel(h: int, d: int):
             q_s_frag = T.alloc_fragment(h, FP32)
             T.copy(q_s[i_b, i_m, 0], q_s_frag)
 
-            for i2_n in T.Pipelined(blk_n1 // blk_n2, num_stages=2):
+            for i2_n in T.Pipelined(blk_n1 // blk_n2, num_stages=1):
                 k_smem = T.alloc_shared((blk_n2, d), FP8)
                 T.copy(k[i_b, i1_n * blk_n1 + i2_n * blk_n2, 0], k_smem)
 
@@ -116,11 +116,11 @@ def fp8_index_torch(q, q_s, k, k_s):
 
 device = "musa"
 
-B = 2
-M = 3
-H = 4
-D = 8
-N = 5
+B = 256
+M = 256
+H = 32
+D = 32
+N = 256
 
 q_fp32 = torch.randn(B, M, H, D, device=device, dtype=torch.float32)
 k_fp32 = torch.randn(B, N, D, device=device, dtype=torch.float32)
@@ -132,11 +132,13 @@ q_s = torch.rand(B, M, H, device=device, dtype=torch.float32)
 k_s = torch.rand(B, N, device=device, dtype=torch.float32)
 o = fp8_index(q_fp8, q_s, k_fp8, k_s)
 
+o_ref = fp8_index_torch(q_fp8, q_s, k_fp8, k_s)
+
 print("q shape:", q_fp8.shape)
 print("q_s shape:", q_s.shape)
 print("k shape:", k_fp8.shape)
 print("k_s shape:", k_s.shape)
 print("o shape:", o.shape)
+print(o_ref)
 print(o)
-
-o_ref = fp8_index_torch(q_fp8, q_s, k_fp8, k_s)
+torch.testing.assert_close(o.to(torch.float32), o_ref.to(torch.float32), rtol=1.25e-2, atol=1.25e-2)
