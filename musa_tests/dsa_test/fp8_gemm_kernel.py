@@ -23,9 +23,9 @@ def fp8_gemm_kernel(N, K, out_dtype=BF16, accum_dtype="float32"):
 
     M = T.symbolic("M")
     group_size = 32
-    block_M = 32
-    block_N = 32
-    block_K = 32
+    block_M = 128
+    block_N = 128
+    block_K = 64
 
     @T.prim_func
     def fp8_gemm_kernel_(
@@ -101,7 +101,7 @@ def fp8_gemm(
     return c
 
 device = "musa"
-M, N, K = 256, 256, 256
+M, N, K = 4096, 4096, 4096
 group_size = 32
 A_fp32 = torch.randn(M, K, device=device, dtype=torch.float32)
 B_fp32 = torch.randn(N, K, device=device, dtype=torch.float32)
@@ -118,3 +118,18 @@ ref_C = A_fp8 @ B_fp8.T
 print(C)
 print(ref_C)
 torch.testing.assert_close(C.to(torch.float32), ref_C.to(torch.float32), rtol=1.25e-1, atol=1.25e-1)
+
+import triton
+
+def get_tflops(latency_ms, M, N, K):
+    latency = latency_ms / 1e3
+    tflops = (2.0 * M * N * K) / latency / 1e12
+    return tflops
+
+ms_torch = triton.musa_testing.do_bench(lambda: torch.mm(A_fp8, B_fp8.T))
+ms_tilelang = triton.musa_testing.do_bench(lambda: fp8_gemm(A_fp8, a_s, B_fp8, b_s))
+print(f"torch latency: {ms_torch:.4f} ms")
+print(f"tilelang kernel latency: {ms_tilelang:.4f} ms")
+print(f"torch tflops: {get_tflops(ms_torch, M, N, K):.4f}")
+print(f"tilelang kernel tflops: {get_tflops(ms_tilelang, M, N, K):.4f}")
+print(f"tilelang2torch speed_up: {round(ms_torch / ms_tilelang, 6)}")
