@@ -13,7 +13,7 @@ TL_DEVICE void cp_async_commit() {
 }
 
 template <int N> TL_DEVICE void cp_async_wait() {
-  // __musa_memcpy_g2s_wait();
+  __musa_memcpy_g2s_wait();
 }
 
 template <int N>

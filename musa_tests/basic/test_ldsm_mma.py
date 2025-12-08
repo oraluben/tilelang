@@ -37,7 +37,7 @@ def get_tilelang_type(elem_type):
 
 
 elem_type_list  = [torch.float16, torch.bfloat16, torch.float8_e4m3fn]
-size_list       = [(256, 256, 256)]
+size_list       = [(4096, 4096, 4096)]
 block_size_list = [(128, 128, 64), (32, 32, 32)]
 num_stages_list = [1]
 test_params = [
