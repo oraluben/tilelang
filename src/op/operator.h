@@ -40,6 +40,7 @@ struct LowerArgs {
   LayoutMap layout_map;
   Map<Buffer, Buffer> buffer_remap;
   Array<Var> buffer_var_gemm;
+  Map<Var, Bool> buffer_var_k_major;
 };
 
 struct LayoutInferArgs {

@@ -108,11 +108,15 @@ class BufferGemmCollector : public StmtExprVisitor {
 public:
   BufferGemmCollector() { Clear(); }
 
-  void Clear() { buffer_var_gemm_.clear(); }
+  void Clear() {
+    buffer_var_gemm_.clear();
+    buffer_var_k_major_.clear();
+  }
 
   void Collect(const Stmt &stmt) { VisitStmt(stmt); }
 
   Array<Var> GetBufferVarGemm() { return buffer_var_gemm_; }
+  Map<Var, Bool> GetBufferVarKMajor() { return buffer_var_k_major_; }
 
 private:
   void VisitStmt_(const EvaluateNode *op) {
@@ -132,9 +136,13 @@ private:
       auto dst_buffer_access_ptr = Downcast<Call>(call->args[2]);
       ICHECK(dst_buffer_access_ptr->op.same_as(builtin::tvm_access_ptr()));
       auto dst_buffer_var = Downcast<Var>(dst_buffer_access_ptr->args[1]);
+      bool trans_a = call->args[3].as<Bool>().value();
+      bool trans_b = call->args[4].as<Bool>().value();
       buffer_var_gemm_.push_back(srcA_buffer_var);
       buffer_var_gemm_.push_back(srcB_buffer_var);
       buffer_var_gemm_.push_back(dst_buffer_var);
+      buffer_var_k_major_.Set(srcA_buffer_var, Bool(!trans_a));
+      buffer_var_k_major_.Set(srcB_buffer_var, Bool(trans_b));
     } else if (call->op.same_as(GemmSP::Get())) {
       auto srcA_buffer_access_ptr = Downcast<Call>(call->args[0]);
       ICHECK(srcA_buffer_access_ptr->op.same_as(builtin::tvm_access_ptr()));
@@ -145,13 +153,18 @@ private:
       auto dst_buffer_access_ptr = Downcast<Call>(call->args[2]);
       ICHECK(dst_buffer_access_ptr->op.same_as(builtin::tvm_access_ptr()));
       auto dst_buffer_var = Downcast<Var>(dst_buffer_access_ptr->args[1]);
+      bool trans_a = call->args[4].as<Bool>().value();
+      bool trans_b = call->args[5].as<Bool>().value();
       buffer_var_gemm_.push_back(srcA_buffer_var);
       buffer_var_gemm_.push_back(srcB_buffer_var);
       buffer_var_gemm_.push_back(dst_buffer_var);
+      buffer_var_k_major_.Set(srcA_buffer_var, Bool(!trans_a));
+      buffer_var_k_major_.Set(srcB_buffer_var, Bool(trans_b));
     }
   }
 
   Array<Var> buffer_var_gemm_;
+  Map<Var, Bool> buffer_var_k_major_;
 };
 
 /*!
@@ -259,6 +272,7 @@ public:
     BufferGemmCollector collector;
     collector.Collect(f->body);
     substituter.buffer_var_gemm_ = collector.GetBufferVarGemm();
+    substituter.buffer_var_k_major_ = collector.GetBufferVarKMajor();
     PrimFuncNode *fptr = f.CopyOnWrite();
     fptr->body = substituter.VisitStmt(f->body);
     fptr->body =
@@ -695,7 +709,8 @@ private:
 
     auto lowered = tile_op->Lower(
         LowerArgs{target_, thread_bounds, thread_var_->var, callback,
-                  layout_map_, buffer_remap_, buffer_var_gemm_},
+                  layout_map_, buffer_remap_, buffer_var_gemm_,
+                  buffer_var_k_major_},
         analyzer_);
     return IRMutatorWithAnalyzer::VisitStmt(lowered);
   }
@@ -735,6 +750,7 @@ private:
   Map<Var, Var> var_remap_;
   bool has_tma_{false};
   Array<Var> buffer_var_gemm_;
+  Map<Var, Bool> buffer_var_k_major_;
 };
 
 namespace transform {

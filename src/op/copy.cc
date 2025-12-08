@@ -1578,24 +1578,30 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
   }
 
   if (TargetIsMusa(T.target)) {
-    auto get_gemm_role = [&](const Buffer &buf) -> int {
+    auto get_k_major = [&](const Buffer &buf) -> int {
       const auto &data_var = buf->data;
-      for (size_t i = 0; i < T.buffer_var_gemm.size(); ++i) {
-        if (data_var->name_hint == T.buffer_var_gemm[i]->name_hint)
-          return static_cast<int>(i);
+      for (const auto &[var, k_major] : T.buffer_var_k_major) {
+        if (data_var->name_hint == var->name_hint)
+          return k_major ? 1 : 0;
       }
       return -1;
     };
     int elem_bytes = shared_tensor->dtype.bytes();
-    int role = get_gemm_role(shared_tensor); // 0->A, 1->B, 2->C
+    int is_k_major = get_k_major(shared_tensor);
     if (elem_bytes == 1) {
       desc.swizzle = static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B16);
-    } else if (elem_bytes == 2 && role != -1) {
-      desc.swizzle = role == 1
-                         ? static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B32)
-                         : static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B16);
+    } else if (elem_bytes == 2) {
+      if (is_k_major == 1) {
+        desc.swizzle = static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B16);
+      } else if (is_k_major == 0) {
+        desc.swizzle = static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B32);
+      } else {
+        LOG(INFO) << src->name << " use elem_bytes " << elem_bytes
+                     << ", unknown matrix layout for swizzle";
+      }
     } else {
-       LOG(WARNING) << src->name << " use elem_bytes " << elem_bytes << ", matrix role " << role;
+      LOG(WARNING) << src->name << " use elem_bytes " << elem_bytes
+                   << ", swizzle not set";
     }
   }
 
