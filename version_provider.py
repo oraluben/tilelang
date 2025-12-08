@@ -61,6 +61,8 @@ def dynamic_metadata(
             # only on macosx_11_0_arm64, not necessary
             # backend = 'metal'
             pass
+        elif _read_cmake_bool(os.environ.get('USE_MUSA', '')):
+            backend = 'musa'
         elif _read_cmake_bool(os.environ.get('USE_ROCM', '')):
             backend = 'rocm'
         elif 'USE_CUDA' in os.environ and not _read_cmake_bool(os.environ.get('USE_CUDA')):
