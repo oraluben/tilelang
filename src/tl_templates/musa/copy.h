@@ -24,11 +24,12 @@ TL_DEVICE void cp_async_gs(void const *const smem_addr, void *global_ptr) {
 template <int N>
 TL_DEVICE void cp_async_gs_conditional(void const *const smem_addr,
                                        void *global_ptr, bool cond) {
-  int bytes = cond ? N : 0;
-  __musa_memcpy_g2s((void _AS3 *)smem_addr,
-                    (void _AS1 *)global_ptr,
-                    bytes /* total_bytes */,
-                    0 /* prefetch_size */);
+  if (cond) {
+    __musa_memcpy_g2s((void _AS3 *)smem_addr,
+                      (void _AS1 *)global_ptr,
+                        N /* total_bytes */,
+                        0 /* prefetch_size */);
+  }
 }
 
 } // namespace tl
