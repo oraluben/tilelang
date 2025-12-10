@@ -3008,7 +3008,7 @@ void CodeGenTileLangMUSA::VisitExpr_(const BroadcastNode *op,
       for (int i = 0; i < lanes / 2; ++i) {
         if (i != 0)
           os << ", ";
-        os << "__pack_nv_bfloat162(" << v << ", " << v << ")";
+        os << "__pack_mt_bfloat162(" << v << ", " << v << ")";
       }
     } else {
       for (int i = 0; i < lanes / 4; ++i) {
