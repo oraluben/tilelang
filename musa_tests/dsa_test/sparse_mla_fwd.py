@@ -12,6 +12,7 @@ tilelang.disable_cache()
         tilelang.PassConfigKey.TL_DISABLE_TMA_LOWER: True,
         tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
     },
+    verbose=True
 )
 def sparse_mla_fwd(
     heads,
@@ -186,7 +187,7 @@ def sparse_mla_fwd_interface(
     indices,
     sm_scale=None,
     return_p_sum: bool = False,
-    d_v=256,
+    d_v=64,
     block_I=64,
     num_stages=2,
     threads=256,
@@ -218,7 +219,8 @@ def sparse_mla_fwd_interface(
         num_stages=num_stages,
         threads=threads,
     )
-    print(kernel.get_kernel_source())
+    kernel.show_source()
+
     # out [B, S_q, H, 512], lse [B, S_q, H]
     out, lse = kernel(q, kv, indices)
     return out, lse
@@ -232,7 +234,7 @@ def ref_sparse_mla_fwd_interface(q, kv, indices, sm_scale=None, is_casual=True):
     b, sk, g, _ = kv.shape
 
     # assert kv.shape[-1] == 576, "you should assign dim otherwise"
-    dim = 256
+    dim = 64
     k = kv
     v = kv[..., :dim]
 
@@ -324,12 +326,12 @@ if __name__ == "__main__":
         SKV=512,
         H=64,
         HKV=1,
-        DQK=320,
-        DV=256,
+        DQK=96,
+        DV=64,
         topk=128,
         dtype=torch.bfloat16,
         check_correctness=True,
-        block_I=16,
+        block_I=32,
         num_stages=2,
         threads=256,
     )
