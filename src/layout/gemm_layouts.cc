@@ -198,14 +198,14 @@ Fragment makeGemmFragmentCHopper(const int block_m, const int block_n,
 Fragment makeGemmFragmentCPH1(const int block_m, const int block_n,
                               const int warp_m, const int warp_n,
                               const int element_size) {
-  ICHECK(warp_m == 4);
-  ICHECK(warp_n == 1);
+  ICHECK(warp_m % 4 == 0);
   ICHECK(element_size == 32);
 
   auto warp_layout = makeGemmFragment4x8();
-  auto block_layout = warp_layout->Repeat({warp_m, warp_n}, true, false);
-  auto register_layout = block_layout->Repeat({1, block_n / 8}, false, false);
-  return register_layout->Repeat({block_m / 16, 1}, false, false);
+  auto block_layout = warp_layout->Repeat({4, 1}, true, false);
+  auto register_layout = block_layout->Repeat({1, warp_n / 8}, false, false);
+  auto squad_layout = register_layout->Repeat({warp_m / 4, 1}, false, false);
+  return squad_layout->Repeat({block_m / warp_m / 4, block_n / warp_n}, true, false);
 }
 
 Fragment makeGemmFragmentA(const int block_m, const int block_n,

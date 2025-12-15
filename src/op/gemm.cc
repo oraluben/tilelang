@@ -139,9 +139,6 @@ GemmInst GemmNode::GetGemmInst(int block_size, Target target) const {
 
 std::pair<int, int> GemmWarpPolicyNode::ComputeWarpPartition(
     int M, int N, int block_size, Target target, GemmInst gemm_inst) const {
-  if (gemm_inst == GemmInst::kSQMMA) {
-    return {4, 1};
-  }
   int num_warps = block_size / TargetGetWarpSize(target);
   if (gemm_inst == GemmInst::kTCGEN5MMA) {
     return {1, num_warps}; // TCGEN5MMA doesn't care about warp partitioning
@@ -158,7 +155,7 @@ std::pair<int, int> GemmWarpPolicyNode::ComputeWarpPartition(
   ICHECK(N % kNPerWarp == 0)
       << "N must be divisible by " << kNPerWarp << ", but got " << N;
 
-  if (gemm_inst == GemmInst::kWGMMA) {
+  if (gemm_inst == GemmInst::kWGMMA || gemm_inst == GemmInst::kSQMMA) {
     ICHECK(num_warps % 4 == 0) << "Warp-Group MMA requires 128×k threads.";
 
     constexpr int kGroup = 4; // Number of warps in a warp-group
@@ -720,7 +717,7 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &T,
     ICHECK(C.scope() == "local.fragment");
     ICHECK(gemm_inst == GemmInst::kSQMMA);
     // C layout
-    auto fragment = makeGemmFragmentCPH1(M, N, warp_m, warp_n,
+    auto fragment = makeGemmFragmentCPH1(M, N, M / warp_m, N / warp_n,
                                          C->dtype.bits());
     results.Set(C, fragment->BindThreadRange(thread_range));
 
