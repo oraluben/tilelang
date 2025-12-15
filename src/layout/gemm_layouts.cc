@@ -202,10 +202,9 @@ Fragment makeGemmFragmentCPH1(const int block_m, const int block_n,
   ICHECK(element_size == 32);
 
   auto warp_layout = makeGemmFragment4x8();
-  auto block_layout = warp_layout->Repeat({4, 1}, true, false);
-  auto register_layout = block_layout->Repeat({1, warp_n / 8}, false, false);
-  auto squad_layout = register_layout->Repeat({warp_m / 4, 1}, false, false);
-  return squad_layout->Repeat({block_m / warp_m / 4, block_n / warp_n}, true, false);
+  auto squad_layout = warp_layout->Repeat({4, 1}, true, false);
+  auto squad_register_layout = squad_layout->Repeat({warp_m / 4, warp_n / 8}, false, true);
+  return squad_register_layout->Repeat({block_m / warp_m / 4, block_n / warp_n}, true, true);
 }
 
 Fragment makeGemmFragmentA(const int block_m, const int block_n,
