@@ -213,6 +213,11 @@ TVM_DLL const Op &tma_load_im2col();
 TVM_DLL const Op &tma_store();
 
 /*!
+ * \brief Placeholder for barrier id before numbering.
+ */
+TVM_DLL const Op &barrier_id_placeholder();
+
+/*!
  * \brief tvm intrinsics for barrier initialization fence
  *
  * ptx_fence_barrier_init()

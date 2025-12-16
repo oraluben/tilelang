@@ -8,6 +8,7 @@
 #include "tvm/tir/stmt.h"
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/target/target.h>
 #include <tvm/tir/analysis.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/stmt_functor.h>
@@ -22,14 +23,15 @@ using namespace tir;
 
 class SharedBarrierRewriter : public StmtExprMutator {
 public:
-  static Stmt Rewrite(Stmt body, bool disable_shuffle_elect = false) {
-    SharedBarrierRewriter rewriter(disable_shuffle_elect);
+  static Stmt Rewrite(Stmt body, bool disable_shuffle_elect = false,
+                      bool is_musa = false) {
+    SharedBarrierRewriter rewriter(disable_shuffle_elect, is_musa);
     return rewriter(std::move(body));
   }
 
 private:
-  SharedBarrierRewriter(bool disable_shuffle_elect)
-      : disable_shuffle_elect_(disable_shuffle_elect) {}
+  SharedBarrierRewriter(bool disable_shuffle_elect, bool is_musa)
+      : disable_shuffle_elect_(disable_shuffle_elect), is_musa_(is_musa) {}
 
   Stmt VisitStmt_(const BlockNode *op) final {
     Block block = tvm::ffi::GetRef<Block>(op);
@@ -82,28 +84,49 @@ private:
     */
 
     // 2. create new buffers
-    Array<Buffer> new_buffers;
+    Array<Var> barrier_vars;
     for (auto buffer : barrier_buffers) {
-      auto data = buffer->data;
-      auto new_buffer = Buffer(data, buffer->dtype, Array<PrimExpr>({1}),
-                               Array<PrimExpr>({1}), PrimExpr(0), buffer->name,
-                               buffer->data_alignment, buffer->offset_factor,
-                               buffer->buffer_type);
-      new_buffers.push_back(new_buffer);
-      buffer_remap_.Set(buffer, new_buffer);
+      if (!is_musa_) {
+        auto data = buffer->data;
+        auto new_buffer = Buffer(data, buffer->dtype, Array<PrimExpr>({1}),
+                                 Array<PrimExpr>({1}), PrimExpr(0),
+                                 buffer->name, buffer->data_alignment,
+                                 buffer->offset_factor, buffer->buffer_type);
+        buffer_remap_.Set(buffer, new_buffer);
+      } else {
+        // Use a plain int32 var as barrier id placeholder for MUSA.
+        Var barrier_var(buffer->name, DataType::Int(32));
+        barrier_vars.push_back(barrier_var);
+        buffer_expr_remap_.Set(buffer, barrier_var);
+      }
     }
 
-    // remove the barrier buffers
-    alloc_buffers.MutateByApply([this](Buffer buf) {
-      if (buffer_remap_.find(buf) != buffer_remap_.end()) {
-        return buffer_remap_.at(buf);
+    if (!is_musa_) {
+      // remove the barrier buffers
+      alloc_buffers.MutateByApply([this](Buffer buf) {
+        if (buffer_remap_.find(buf) != buffer_remap_.end()) {
+          return buffer_remap_.at(buf);
+        }
+        return buf;
+      });
+      if (!alloc_buffers.same_as(op->alloc_buffers)) {
+        block.CopyOnWrite()->alloc_buffers = alloc_buffers;
+      } else {
+        return StmtExprMutator::VisitStmt_(op);
       }
-      return buf;
-    });
-    if (!alloc_buffers.same_as(op->alloc_buffers)) {
-      block.CopyOnWrite()->alloc_buffers = alloc_buffers;
     } else {
-      return StmtExprMutator::VisitStmt_(op);
+      Array<Buffer> filtered;
+      filtered.reserve(alloc_buffers.size());
+      for (auto buf : alloc_buffers) {
+        if (!buffer_expr_remap_.count(buf)) {
+          filtered.push_back(buf);
+        }
+      }
+      if (!filtered.same_as(op->alloc_buffers)) {
+        block.CopyOnWrite()->alloc_buffers = filtered;
+      } else {
+        return StmtExprMutator::VisitStmt_(op);
+      }
     }
 
     // 3. create init calls for new buffers
@@ -111,12 +134,19 @@ private:
     for (auto buffer : barrier_buffers) {
       auto data = buffer->data;
       auto old_buffer = buffer_data_to_buffer_.at(data);
-      auto new_buffer = buffer_remap_.at(old_buffer);
       auto count = old_buffer->shape[0];
+
+      PrimExpr barrier_ref;
+      if (!is_musa_) {
+        auto new_buffer = buffer_remap_.at(old_buffer);
+        barrier_ref = BufferLoad(new_buffer, {0});
+      } else {
+        barrier_ref = buffer_expr_remap_.at(old_buffer);
+      }
 
       auto call =
           Call(DataType::Handle(), builtin::ptx_init_barrier_thread_count(),
-               {BufferLoad(new_buffer, {0}), PrimExpr(count)});
+               {barrier_ref, PrimExpr(count)});
       init_mbarrier_calls_.push_back(Evaluate(call));
     }
     if (init_mbarrier_calls_.empty())
@@ -134,12 +164,23 @@ private:
                                       ? init_mbarrier_calls_.back()
                                       : SeqStmt(init_mbarrier_calls_),
                                   Stmt()));
-    new_body.push_back(
-        Evaluate(Call(DataType::Handle(), builtin::tvm_storage_sync(),
-                      {StringImm("shared")})));
+    if (!is_musa_) {
+      new_body.push_back(
+          Evaluate(Call(DataType::Handle(), builtin::tvm_storage_sync(),
+                        {StringImm("shared")})));
+    }
     new_body.push_back(block->body);
 
-    block.CopyOnWrite()->body = SeqStmt(new_body);
+    Stmt new_block_body = SeqStmt(new_body);
+    if (is_musa_) {
+      for (int i = static_cast<int>(barrier_vars.size()) - 1; i >= 0; --i) {
+        PrimExpr placeholder =
+            Call(DataType::Int(32), barrier_id_placeholder(), {});
+        new_block_body = LetStmt(barrier_vars[i], placeholder, new_block_body);
+      }
+    }
+
+    block.CopyOnWrite()->body = new_block_body;
 
     return StmtExprMutator::VisitStmt_(block.get());
   }
@@ -147,6 +188,9 @@ private:
   PrimExpr VisitExpr_(const BufferLoadNode *op) final {
     auto load = Downcast<BufferLoad>(StmtExprMutator::VisitExpr_(op));
     auto buffer = load->buffer;
+    if (buffer_expr_remap_.count(buffer)) {
+      return buffer_expr_remap_.at(buffer);
+    }
     if (buffer_remap_.count(buffer)) {
       auto new_buffer = buffer_remap_[load->buffer];
       return BufferLoad(new_buffer, load->indices);
@@ -157,6 +201,9 @@ private:
   Stmt VisitStmt_(const BufferStoreNode *op) final {
     auto store = Downcast<BufferStore>(StmtExprMutator::VisitStmt_(op));
     auto buffer = store->buffer;
+    if (buffer_expr_remap_.count(buffer)) {
+      ICHECK(false) << "Storing to a barrier var is not supported.";
+    }
     if (buffer_remap_.count(buffer)) {
       auto new_buffer = buffer_remap_[store->buffer];
       return BufferStore(new_buffer, store->value, store->indices);
@@ -180,15 +227,18 @@ private:
   IterVar thread_var_;
   Map<Var, Buffer> buffer_data_to_buffer_;
   Map<Buffer, Buffer> buffer_remap_;
+  Map<Buffer, PrimExpr> buffer_expr_remap_;
   // Mapping from data Var of a Buffer to Buffer, for lookup
   std::unordered_map<Var, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_map_;
   // Disable shuffle elect for the warp specialized kernel
   bool disable_shuffle_elect_;
+  bool is_musa_;
 };
 
-PrimFunc LowerSharedBarrier(PrimFunc f, bool disable_shuffle_elect) {
+PrimFunc LowerSharedBarrier(PrimFunc f, bool disable_shuffle_elect,
+                            bool is_musa) {
   f.CopyOnWrite()->body =
-      SharedBarrierRewriter::Rewrite(f->body, disable_shuffle_elect);
+      SharedBarrierRewriter::Rewrite(f->body, disable_shuffle_elect, is_musa);
   return f;
 }
 
@@ -199,7 +249,11 @@ tvm::transform::Pass LowerSharedBarrier() {
   auto pass_func = [=](PrimFunc f, const IRModule &m, PassContext ctx) {
     bool disable_shuffle_elect =
         ctx->GetConfig<Bool>(kDisableShuffleElect, Bool(false)).value();
-    return tl::LowerSharedBarrier(std::move(f), disable_shuffle_elect);
+    bool is_musa = false;
+    if (auto target = f->GetAttr<Target>(tvm::attr::kTarget)) {
+      is_musa = target.value()->kind->name == "musa";
+    }
+    return tl::LowerSharedBarrier(std::move(f), disable_shuffle_elect, is_musa);
   };
   return CreatePrimFuncPass(pass_func, 0, "tl.LowerSharedBarrier", {});
 }

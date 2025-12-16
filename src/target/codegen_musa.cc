@@ -2384,21 +2384,6 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
         barrier_name_ + "[" + std::to_string(barrier_id) + "]";
     std::string thread_count = this->PrintExpr(op->args[1]);
     this->stream << PrintInitBarrierThreadCountAsm(barrier, thread_count);
-  } else if (op->op.same_as(builtin::ptx_arrive_barrier())) {
-    need_cast_smem_ptr_to_int_ = true;
-    int barrier_id = Downcast<IntImm>(op->args[0])->value;
-    CHECK(barrier_id < barrier_count_);
-    std::string barrier =
-        barrier_name_ + "[" + std::to_string(barrier_id) + "]";
-    this->stream << PrintArriveBarrierAsm(barrier);
-  } else if (op->op.same_as(builtin::ptx_arrive_barrier_expect_tx())) {
-    need_cast_smem_ptr_to_int_ = true;
-    int barrier_id = Downcast<IntImm>(op->args[0])->value;
-    CHECK(barrier_id < barrier_count_);
-    std::string barrier =
-        barrier_name_ + "[" + std::to_string(barrier_id) + "]";
-    std::string byte_count = this->PrintExpr(op->args[1]);
-    this->stream << PrintArriveBarrierExpectTxAsm(barrier, byte_count);
   } else if (op->op.same_as(builtin::ptx_wait_barrier())) {
     need_cast_smem_ptr_to_int_ = true;
     int barrier_id = Downcast<IntImm>(op->args[0])->value;

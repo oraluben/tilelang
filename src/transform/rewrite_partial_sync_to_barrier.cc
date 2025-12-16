@@ -47,8 +47,16 @@ public:
   }
   int barrier_count() const { return barrier_count_; }
   int sync_count() const { return sync_count_; }
+  int placeholder_count() const { return placeholder_count_; }
 
 private:
+  PrimExpr VisitExpr_(const CallNode *call) final {
+    if (call->op.same_as(barrier_id_placeholder())) {
+      placeholder_count_++;
+    }
+    return StmtExprMutator::VisitExpr_(call);
+  }
+
   std::optional<Stmt> RewriteStorageSync(const CallNode *call) {
     if (call->args.size() != 3) {
       return std::nullopt;
@@ -79,6 +87,7 @@ private:
   std::unordered_map<int, PrimExpr> partial_syncs_;
   int barrier_count_{0};
   int sync_count_{0};
+  int placeholder_count_{0};
 };
 
 class MbarrierSyncRewriter : public StmtExprMutator {
@@ -95,9 +104,6 @@ public:
         if (auto rewritten = RewriteMusaSync(call)) {
           return rewritten.value();
         }
-      } else if (call->op.same_as(builtin::create_barriers())) {
-        // Drop existing create_barriers; we'll emit a single unified one later.
-        return Stmt();
       }
     }
     return StmtExprMutator::VisitStmt_(op);
@@ -175,6 +181,52 @@ private:
   bool init_inserted_{false};
 };
 
+class BarrierIdPlaceholderRewriter : public StmtExprMutator {
+public:
+  BarrierIdPlaceholderRewriter(int placeholder_start)
+      : placeholder_next_id_(placeholder_start) {}
+
+private:
+  PrimExpr VisitExpr_(const CallNode *op) final {
+    if (op->op.same_as(barrier_id_placeholder())) {
+      int current_id = placeholder_next_id_ + 1;
+      placeholder_next_id_++;
+      return IntImm(DataType::Int(32), current_id);
+    }
+    return StmtExprMutator::VisitExpr_(op);
+  }
+
+  int placeholder_next_id_{0};
+};
+
+class CreateBarrierRewriter : public StmtExprMutator {
+public:
+  static Stmt Rewrite(Stmt body, int new_barrier_count) {
+    CreateBarrierRewriter rewriter;
+    body = rewriter(std::move(body));
+
+    // Insert a fresh create_barriers with the new count.
+    Array<Stmt> stmts;
+    auto create =
+        Evaluate(Call(DataType::Handle(), builtin::create_barriers(),
+                      {IntImm(DataType::Int(32), new_barrier_count)}));
+    stmts.push_back(create);
+    stmts.push_back(body);
+    return SeqStmt(stmts);
+  }
+
+private:
+  Stmt VisitStmt_(const EvaluateNode *op) final {
+    if (const auto *call = op->value.as<CallNode>()) {
+      if (call->op.same_as(builtin::create_barriers())) {
+        // Drop existing create_barriers; we'll emit a single unified one later.
+        return Stmt();
+      }
+    }
+    return StmtExprMutator::VisitStmt_(op);
+  }
+};
+
 PrimFunc RewritePartialSyncToBarrier(PrimFunc f) {
   auto *n = f.CopyOnWrite();
 
@@ -182,47 +234,47 @@ PrimFunc RewritePartialSyncToBarrier(PrimFunc f) {
   // Run prepass on a copy of the body so we can still early-return the
   // untouched PrimFunc when there is no barrier to rewrite.
   Stmt body = prepass(n->body);
-  if (prepass.sync_count() == 0) {
-    return f;
-  }
-
-  std::vector<std::pair<int, PrimExpr>> syncs(prepass.partial_syncs().begin(),
-                                              prepass.partial_syncs().end());
-  std::sort(syncs.begin(), syncs.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.first < rhs.first;
-  });
-
   int base_count = prepass.barrier_count();
-
-  std::vector<std::pair<int, PrimExpr>> barrier_inits;
-  barrier_inits.reserve(syncs.size());
-  for (const auto &[offset, thread_count] : syncs) {
-    barrier_inits.push_back({base_count + offset, thread_count});
-  }
-
-  MbarrierSyncRewriter rewriter(base_count, std::move(barrier_inits));
-  body = rewriter(std::move(body));
-
   Array<Stmt> prefix;
-  // Always insert a fresh create_barriers with the new count.
-  int new_barrier_count = base_count + syncs.size();
-  auto create = Evaluate(Call(DataType::Handle(), builtin::create_barriers(),
-                              {IntImm(DataType::Int(32), new_barrier_count)}));
-  prefix.push_back(create);
 
-  // If MbarrierSyncRewriter has not previously inserted barrier inits
-  if (!rewriter.init_inserted()) {
-    auto cond = Call(DataType::Bool(), tl_shuffle_elect(),
-                     {IntImm(DataType::Int(32), 0)});
-    auto init_stmts = rewriter.MakeInitStmts();
-    auto seq = init_stmts.size() == 1 ? init_stmts[0] : SeqStmt(init_stmts);
-    prefix.push_back(IfThenElse(cond, seq));
+  if (prepass.placeholder_count() != 0) {
+    int placeholder_start = base_count;
+    base_count += prepass.placeholder_count();
+    BarrierIdPlaceholderRewriter rewriter(placeholder_start);
+    body = rewriter(std::move(body));
   }
 
-  if (!prefix.empty()) {
-    prefix.push_back(body);
-    body = SeqStmt(prefix);
+  if (prepass.sync_count() != 0) {
+    std::vector<std::pair<int, PrimExpr>> syncs(prepass.partial_syncs().begin(),
+                                                prepass.partial_syncs().end());
+    std::sort(syncs.begin(), syncs.end(), [](const auto &lhs, const auto &rhs) {
+      return lhs.first < rhs.first;
+    });
+
+    std::vector<std::pair<int, PrimExpr>> barrier_inits;
+    barrier_inits.reserve(syncs.size());
+    for (const auto &[offset, thread_count] : syncs) {
+      barrier_inits.push_back({base_count + offset, thread_count});
+    }
+
+    MbarrierSyncRewriter rewriter(base_count, std::move(barrier_inits));
+    body = rewriter(std::move(body));
+    // If MbarrierSyncRewriter has not previously inserted barrier inits
+    if (!rewriter.init_inserted()) {
+      auto cond = Call(DataType::Bool(), tl_shuffle_elect(),
+                       {IntImm(DataType::Int(32), 0)});
+      auto init_stmts = rewriter.MakeInitStmts();
+      auto seq = init_stmts.size() == 1 ? init_stmts[0] : SeqStmt(init_stmts);
+      prefix.push_back(IfThenElse(cond, seq));
+      if (!prefix.empty()) {
+        prefix.push_back(body);
+        body = SeqStmt(prefix);
+      }
+    }
   }
+
+  body = CreateBarrierRewriter::Rewrite(std::move(body),
+                                        base_count + prepass.sync_count());
 
   n->body = std::move(body);
   return f;
