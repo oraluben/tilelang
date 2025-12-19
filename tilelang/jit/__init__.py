@@ -51,6 +51,7 @@ def compile(
     target_host: str | Target | None = None,
     verbose: bool = False,
     pass_configs: dict[str, Any] | None = None,
+    instruments: list[tvm.instrument.PassInstrument] | None = None,
     compile_flags: list[str] | str | None = None,
 ) -> JITKernel[_KP, _T]:
     """
@@ -91,6 +92,7 @@ def compile(
         target_host=target_host,
         verbose=verbose,
         pass_configs=pass_configs,
+        instruments=instruments,
         compile_flags=compile_flags,
     )
 
@@ -102,6 +104,7 @@ def par_compile(funcs: Iterable[PrimFunc[_KP, _T]],
                 target_host: str | Target | None = None,
                 verbose: bool = False,
                 pass_configs: dict[str, Any] | None = None,
+                instruments: list[tvm.instrument.PassInstrument] | None = None,
                 compile_flags: list[str] | str | None = None,
                 num_workers: int = None,
                 ignore_error: bool = False) -> list[JITKernel[_KP, _T]]:
@@ -138,6 +141,7 @@ def par_compile(funcs: Iterable[PrimFunc[_KP, _T]],
                 target_host=target_host,
                 verbose=verbose,
                 pass_configs=pass_configs,
+                instruments=instruments,
                 compile_flags=compile_flags,
             )
             future_map[future] = i
@@ -170,6 +174,7 @@ class JITImpl(Generic[_P, _KP, _T]):
     target_host: str | Target
     verbose: bool
     pass_configs: dict[str, Any] | None
+    instruments: list[tvm.instrument.PassInstrument] | None
     debug_root_path: str | None
     compile_flags: list[str] | str | None
     func_source: str
@@ -215,6 +220,7 @@ class JITImpl(Generic[_P, _KP, _T]):
             target_host=self.target_host,
             verbose=self.verbose,
             pass_configs=self.pass_configs,
+            instruments=self.instruments,
             compile_flags=self.compile_flags,
             num_workers=num_workers,
             ignore_error=ignore_error)
@@ -229,6 +235,7 @@ class JITImpl(Generic[_P, _KP, _T]):
             target_host=self.target_host,
             verbose=self.verbose,
             pass_configs=self.pass_configs,
+            instruments=self.instruments,
             compile_flags=self.compile_flags,
         )
 
@@ -260,6 +267,7 @@ class JITImpl(Generic[_P, _KP, _T]):
                 'target_host': self.target_host,
                 'verbose': self.verbose,
                 'pass_configs': self.pass_configs,
+                'instruments': self.instruments,
                 'compile_flags': self.compile_flags,
             }
             return compile_args
@@ -289,6 +297,7 @@ def jit(
     execution_backend: Literal["dlpack", "ctypes", "cython", "nvrtc"] = "cython",
     verbose: bool = False,
     pass_configs: dict[str, Any] | None = None,
+    instruments: list[tvm.instrument.PassInstrument] | None = None,
     debug_root_path: str | None = None,
     compile_flags: list[str] | str | None = None
 ) -> Callable[[Callable[_P, PrimFunc[_KP, _T]]], JITImpl[_P, _KP, _T]]:
@@ -304,6 +313,7 @@ def jit(  # This is the new public interface
         execution_backend: Literal["dlpack", "ctypes", "cython", "nvrtc"] = "cython",
         verbose: bool = False,
         pass_configs: dict[str, Any] | None = None,
+        instruments: list[tvm.instrument.PassInstrument] | None = None,
         debug_root_path: str | None = None,
         compile_flags: list[str] | str | None = None):
     """
@@ -353,6 +363,7 @@ def jit(  # This is the new public interface
             target_host=target_host,
             verbose=verbose,
             pass_configs=pass_configs,
+            instruments=instruments,
             debug_root_path=debug_root_path,
             compile_flags=compile_flags,
             func_source=inspect.getsource(orig_func),

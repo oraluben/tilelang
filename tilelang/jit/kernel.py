@@ -60,6 +60,7 @@ class JITKernel(Generic[_P, _T]):
         target_host: str | Target = None,
         verbose: bool = False,
         pass_configs: dict[str, Any] | None = None,
+        instruments: list[tvm.instrument.PassInstrument] | None = None,
         from_database: bool = False,
         compile_flags: list[str] | None = None,
     ):
@@ -94,6 +95,9 @@ class JITKernel(Generic[_P, _T]):
         if pass_configs is None:
             pass_configs = {}
         self.pass_configs = pass_configs
+        if instruments is None:
+            instruments = []
+        self.instruments = instruments
 
         self.compile_flags = compile_flags
 
@@ -219,13 +223,15 @@ class JITKernel(Generic[_P, _T]):
 
         execution_backend = self.execution_backend
         pass_configs = self.pass_configs
+        instruments = self.instruments
 
         compile_flags = self.compile_flags
 
         # Compile the function with TVM, optimizing with shared memory lowering.
         enable_host_codegen = execution_backend == "dlpack"
         enable_device_compile = execution_backend == "dlpack"
-        with tvm.transform.PassContext(opt_level=3, config=pass_configs), self.target:
+        with tvm.transform.PassContext(
+                opt_level=3, config=pass_configs, instruments=instruments), self.target:
             artifact = tilelang.lower(
                 tilelang_func,
                 target=target,

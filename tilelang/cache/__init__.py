@@ -21,6 +21,7 @@ def cached(
     execution_backend: Literal["dlpack", "ctypes", "cython", "nvrtc"] | None = "cython",
     verbose: bool | None = False,
     pass_configs: dict | None = None,
+    instruments: list | None = None,
     compile_flags: list[str] | str | None = None,
 ) -> JITKernel:
     """
@@ -35,6 +36,7 @@ def cached(
         execution_backend=execution_backend,
         verbose=verbose,
         pass_configs=pass_configs,
+        instruments=instruments,
         compile_flags=compile_flags)
 
 

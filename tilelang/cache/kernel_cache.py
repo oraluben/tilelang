@@ -120,6 +120,7 @@ class KernelCache:
         execution_backend: Literal["dlpack", "ctypes", "cython", "nvrtc"] = "cython",
         verbose: bool = False,
         pass_configs: dict = None,
+        instruments: list | None = None,
         compile_flags: list[str] | str | None = None,
     ) -> JITKernel:
         """
@@ -144,6 +145,7 @@ class KernelCache:
                 target_host=target_host,
                 verbose=verbose,
                 pass_configs=pass_configs,
+                instruments=instruments,
                 compile_flags=compile_flags,
             )
 
@@ -190,6 +192,7 @@ class KernelCache:
             target_host=target_host,
             verbose=verbose,
             pass_configs=pass_configs,
+            instruments=instruments,
             compile_flags=compile_flags,
         )
         if execution_backend in ("dlpack", "torch"):
