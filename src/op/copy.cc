@@ -100,7 +100,6 @@ static int to_CUtensorMapDataType(DataType dtype) {
   return static_cast<int>(tp);
 }
 
-
 /*!
  * \brief Helper to map TVM's DataType to CUDA's CUtensorMapDataType enum value.
  * This function converts TVM data types to CUDA tensor map data types for TMA
@@ -1540,7 +1539,7 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
     desc.swizzle = static_cast<int>(CU_TENSOR_MAP_SWIZZLE_NONE);
   } else if (StructuralEqual()(shared_layout, linear_layout)) {
     desc.swizzle = static_cast<int>(CU_TENSOR_MAP_SWIZZLE_NONE);
-  } else if(!TargetIsMusa(T.target)){
+  } else if (!TargetIsMusa(T.target)) {
     ICHECK(shared_layout->InputDim() == 2) << "Cannot detect TMA layout.";
     auto stride = as_const_int(shared_layout->InputShape()[0]);
     auto continuous = as_const_int(shared_layout->InputShape()[1]);
@@ -1577,15 +1576,16 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
     }
   }
 
+  auto get_k_major = [&](const Buffer &buf) -> int {
+    const auto &data_var = buf->data;
+    for (const auto &[var, k_major] : T.buffer_var_k_major) {
+      if (data_var->name_hint == var->name_hint)
+        return k_major ? 1 : 0;
+    }
+    return -1;
+  };
+  // set swizzle granularity by elem_bytes and k_major
   if (TargetIsMusa(T.target)) {
-    auto get_k_major = [&](const Buffer &buf) -> int {
-      const auto &data_var = buf->data;
-      for (const auto &[var, k_major] : T.buffer_var_k_major) {
-        if (data_var->name_hint == var->name_hint)
-          return k_major ? 1 : 0;
-      }
-      return -1;
-    };
     int elem_bytes = shared_tensor->dtype.bytes();
     int is_k_major = get_k_major(shared_tensor);
     if (elem_bytes == 1) {
@@ -1597,11 +1597,44 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
         desc.swizzle = static_cast<int>(MU_SMEM_SWIZZLE_GRANULARITY_B32);
       } else {
         LOG(INFO) << src->name << " use elem_bytes " << elem_bytes
-                     << ", unknown matrix layout for swizzle";
+                  << ", unknown matrix layout for swizzle";
       }
     } else {
       LOG(WARNING) << src->name << " use elem_bytes " << elem_bytes
                    << ", swizzle not set";
+    }
+  }
+
+  int split_count = 1;
+  PrimExpr split_stride = 0;
+  PrimExpr split_size_expr = 0;
+  if (TargetIsMusa(T.target) && is_load && desc.rank == 2) {
+    auto get_warp_n = [&](const Buffer &buf) -> int {
+      const auto &data_var = buf->data;
+      for (const auto &[var, warp_n] : T.buffer_var_warp_n) {
+        if (data_var->name_hint == var->name_hint) {
+          auto warp_n_imm = warp_n.as<IntImmNode>();
+          if (warp_n_imm) {
+            return warp_n_imm->value;
+          }
+        }
+      }
+      return -1;
+    };
+    int warp_n = get_warp_n(shared_tensor);
+    int is_k_major = get_k_major(shared_tensor);
+    if (warp_n > 1 && is_k_major == 0) {
+      auto n_dim = as_const_int(desc.smem_box[0]);
+      ICHECK(n_dim != nullptr)
+          << "warp_n split requires static N for " << shared_tensor->name;
+      ICHECK((*n_dim) % warp_n == 0)
+          << "N must be divisible by warp_n for " << shared_tensor->name
+          << ", N=" << *n_dim << ", warp_n=" << warp_n;
+      int split_size = (*n_dim) / warp_n;
+      split_count = warp_n;
+      split_size_expr = IntImm(DataType::Int(32), split_size);
+      split_stride = split_size_expr * desc.smem_box[1];
+      desc.smem_box.Set(0, split_size_expr);
     }
   }
 
@@ -1636,15 +1669,15 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
   };
   if (!TargetIsMusa(T.target)) {
     static const std::vector<SwizzleCheck> swizzle_checks = {
-      {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_32B), 32},
-      {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_64B), 64},
-      {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_128B), 128},
+        {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_32B), 32},
+        {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_64B), 64},
+        {static_cast<int>(CU_TENSOR_MAP_SWIZZLE_128B), 128},
     };
     for (const auto &check : swizzle_checks) {
       if (desc.swizzle == check.swizzle && inner_box_dim_ > check.max_dim) {
         LOG(WARNING) << "TMA bulk copy cannot support a swizzled global layout "
                         "with inner_box_dim_ > "
-                    << check.max_dim << ", will be fallback to normal copy";
+                     << check.max_dim << ", will be fallback to normal copy";
         return LowerNormalCopy(T, analyzer);
       }
     }
@@ -1653,11 +1686,6 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
   Call create_descriptor =
       Call(DataType::Handle(), create_tma_descriptor(), desc.EncodeCallArgs());
 
-  Array<PrimExpr> args;
-  args.reserve(desc.rank + 4);
-  args.push_back(create_descriptor);
-  if (is_load)
-    args.push_back(0); // mbarrier id placeholder
   auto op = is_load ? tma_load() : tma_store();
 
   Stmt tma_copy;
@@ -1665,35 +1693,86 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
   for (auto e : desc.smem_box)
     total_elements *= e;
 
-  if ((*inner_box_dim) != instruction_dim) {
-    Var loop_var("i");
-    int loop_extent = (*inner_box_dim) / instruction_dim;
-
-    PrimExpr shared_addr = shared_tensor.access_ptr(
-        is_load ? 2 : 1, DataType::Handle(), 1,
-        shared_offset + total_elements * loop_var, total_elements);
-    args.push_back(shared_addr);
-    global_coords.Set(0, global_coords[0] + instruction_dim * loop_var);
-    for (auto coord : global_coords)
-      args.push_back(coord);
-    int need_reduce = 0;
-    if (!is_load)
-      args.push_back(need_reduce);
-    args.push_back(this->eviction_policy);
-    tma_copy = For(loop_var, 0, loop_extent, ForKind::kUnrolled,
-                   Evaluate(Call(DataType::Handle(), op, args)));
+  if (TargetIsMusa(T.target) && split_count > 1) {
+    Array<PrimExpr> base_args;
+    base_args.reserve(desc.rank + 4);
+    base_args.push_back(create_descriptor);
+    if (is_load)
+      base_args.push_back(0); // mbarrier id placeholder
+    auto emit_tma_copy = [&](PrimExpr shared_addr,
+                             const Array<PrimExpr> &coords) -> Stmt {
+      Array<PrimExpr> call_args = base_args;
+      call_args.push_back(shared_addr);
+      for (auto coord : coords)
+        call_args.push_back(coord);
+      int need_reduce = 0;
+      if (!is_load)
+        call_args.push_back(need_reduce);
+      call_args.push_back(this->eviction_policy);
+      return Evaluate(Call(DataType::Handle(), op, call_args));
+    };
+    auto make_inner_copy = [&](PrimExpr base_shared_offset,
+                               const Array<PrimExpr> &base_coords) -> Stmt {
+      if ((*inner_box_dim) != instruction_dim) {
+        Var loop_var("i");
+        int loop_extent = (*inner_box_dim) / instruction_dim;
+        Array<PrimExpr> coords = base_coords;
+        coords.Set(0, coords[0] + instruction_dim * loop_var);
+        PrimExpr shared_addr = shared_tensor.access_ptr(
+            is_load ? 2 : 1, DataType::Handle(), 1,
+            base_shared_offset + total_elements * loop_var, total_elements);
+        return For(loop_var, 0, loop_extent, ForKind::kUnrolled,
+                   emit_tma_copy(shared_addr, coords));
+      } else {
+        PrimExpr shared_addr =
+            shared_tensor.access_ptr(is_load ? 2 : 1, DataType::Handle(), 1,
+                                     base_shared_offset, total_elements);
+        return emit_tma_copy(shared_addr, base_coords);
+      }
+    };
+    Var split_var("s");
+    Array<PrimExpr> coords = global_coords;
+    coords.Set(0, coords[0] + split_size_expr * split_var);
+    PrimExpr base_shared_offset = shared_offset + split_stride * split_var;
+    tma_copy = For(split_var, 0, split_count, ForKind::kUnrolled,
+                   make_inner_copy(base_shared_offset, coords));
   } else {
-    PrimExpr shared_addr = shared_tensor.access_ptr(
-        is_load ? 2 : 1, DataType::Handle(), 1, shared_offset, total_elements);
-    args.push_back(shared_addr);
-    for (auto coord : global_coords)
-      args.push_back(coord);
-    int need_reduce = 0;
-    if (!is_load)
-      args.push_back(need_reduce);
-    args.push_back(this->eviction_policy);
-    tma_copy = Evaluate(Call(DataType::Handle(), op, args));
+    Array<PrimExpr> args;
+    args.reserve(desc.rank + 4);
+    args.push_back(create_descriptor);
+    if (is_load)
+      args.push_back(0); // mbarrier id placeholder
+    if ((*inner_box_dim) != instruction_dim) {
+      Var loop_var("i");
+      int loop_extent = (*inner_box_dim) / instruction_dim;
+      PrimExpr shared_addr = shared_tensor.access_ptr(
+          is_load ? 2 : 1, DataType::Handle(), 1,
+          shared_offset + total_elements * loop_var, total_elements);
+      args.push_back(shared_addr);
+      global_coords.Set(0, global_coords[0] + instruction_dim * loop_var);
+      for (auto coord : global_coords)
+        args.push_back(coord);
+      int need_reduce = 0;
+      if (!is_load)
+        args.push_back(need_reduce);
+      args.push_back(this->eviction_policy);
+      tma_copy = For(loop_var, 0, loop_extent, ForKind::kUnrolled,
+                     Evaluate(Call(DataType::Handle(), op, args)));
+    } else {
+      PrimExpr shared_addr =
+          shared_tensor.access_ptr(is_load ? 2 : 1, DataType::Handle(), 1,
+                                   shared_offset, total_elements);
+      args.push_back(shared_addr);
+      for (auto coord : global_coords)
+        args.push_back(coord);
+      int need_reduce = 0;
+      if (!is_load)
+        args.push_back(need_reduce);
+      args.push_back(this->eviction_policy);
+      tma_copy = Evaluate(Call(DataType::Handle(), op, args));
+    }
   }
+
   tma_copy = IfThenElse(EQ(T.thread_var, T.thread_bounds->min), tma_copy);
 
   return tma_copy;

@@ -1,12 +1,14 @@
 #pragma once
 
+// clang-format off
 #include "common.h"
 // #include "gemm_mma.h"
 #include "intrin.h"
 
-#include <mute/atom/mma_atom.hpp>
 #include <mute/tensor.hpp>
+#include <mute/atom/mma_atom.hpp>
 #include <mutlass/gemm/collective/collective_builder.hpp>
+// clang-format on
 
 namespace mute {
 
@@ -30,11 +32,14 @@ public:
   static constexpr TCE::Major SqmmaMajorB =
       trans_B ? TCE::Major::K : TCE::Major::MN;
 
+  // Tile handled by one squad warp
+  using AtomShape_MNK =
+      Shape<Int<M / (num_warp_m / 4)>, Int<N / num_warp_n>, Int<K>>;
   using TileShape_MNK = Shape<Int<M>, Int<N>, Int<K>>;
 
   using SqmmaOp =
       decltype(mute::MP31::SQMMA::ss_op_selector<A_type, B_type, C_type,
-                                                 TileShape_MNK, SqmmaMajorA,
+                                                 AtomShape_MNK, SqmmaMajorA,
                                                  SqmmaMajorB>());
   using SqmmaTraits = MMA_Traits<SqmmaOp>;
   using InstructionShape_MNK = typename SqmmaTraits::Shape_MNK;

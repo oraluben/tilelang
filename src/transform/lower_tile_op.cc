@@ -316,6 +316,18 @@ private:
         layout_map_.Set(buffer, layout);
       }
     }
+    if (op->annotations.count(attr::kWarpNMap)) {
+      auto warp_n_map =
+          op->annotations.at(attr::kWarpNMap).as<Map<Var, PrimExpr>>().value();
+      for (const auto &[var, warp_n] : warp_n_map) {
+        if (buffer_var_warp_n_.count(var)) {
+          ICHECK(StructuralEqual()(buffer_var_warp_n_[var], warp_n))
+              << "warp_n mismatch for buffer " << var->name_hint;
+        } else {
+          buffer_var_warp_n_.Set(var, warp_n);
+        }
+      }
+    }
     // Begin a new workspace collection frame for this block scope
     workspace_stack_.emplace_back();
 
@@ -710,7 +722,7 @@ private:
     auto lowered = tile_op->Lower(
         LowerArgs{target_, thread_bounds, thread_var_->var, callback,
                   layout_map_, buffer_remap_, buffer_var_gemm_,
-                  buffer_var_k_major_},
+                  buffer_var_k_major_, buffer_var_warp_n_},
         analyzer_);
     return IRMutatorWithAnalyzer::VisitStmt(lowered);
   }
@@ -751,6 +763,7 @@ private:
   bool has_tma_{false};
   Array<Var> buffer_var_gemm_;
   Map<Var, Bool> buffer_var_k_major_;
+  Map<Var, PrimExpr> buffer_var_warp_n_;
 };
 
 namespace transform {
