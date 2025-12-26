@@ -207,7 +207,7 @@ Fragment makePHSqmmaFragmentC(const int block_m, const int block_n,
   auto squad_layout = base_layout->Repeat({4, 1}, true, false);
   auto block_layout =
       squad_layout->Repeat({warp_tile_m / 4, warp_tile_n / 8}, false, true);
-  return block_layout->Repeat({warp_m / 4, warp_n}, true, true);
+  return block_layout->Repeat({warp_m / 4, warp_n}, true, false);
 }
 
 Fragment makeGemmFragmentA(const int block_m, const int block_n,

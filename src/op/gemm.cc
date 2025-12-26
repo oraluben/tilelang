@@ -145,10 +145,14 @@ std::pair<int, int> GemmWarpPolicyNode::ComputeWarpPartition(
   }
 
   int m_warp = 1, n_warp = 1;
-  constexpr int kMPerWarp = 16; // Rows processed by a single warp
-  int kNPerWarp = 8;            // Columns processed by a single warp
+  int kMPerWarp = 16; // Rows processed by a single warp
+  int kNPerWarp = 8;  // Columns processed by a single warp
   if (TargetIsVolta(target)) {
     kNPerWarp = 16;
+  }
+  if (TargetIsPH1(target) && gemm_inst == GemmInst::kSQMMA) {
+    kMPerWarp = 4;
+    kNPerWarp = 8;
   }
   ICHECK(M % kMPerWarp == 0)
       << "M must be divisible by " << kMPerWarp << ", but got " << M;
@@ -200,7 +204,7 @@ std::pair<int, int> GemmWarpPolicyNode::ComputeWarpPartition(
       int best_m = kGroup, best_n = n_warp;
 
       for (int m = kGroup; m <= num_warps && m <= max_m; m += kGroup) {
-        if (num_warps % m)
+        if (num_warps % m != 0)
           continue;
         int n = num_warps / m;
         if (n > max_n)
