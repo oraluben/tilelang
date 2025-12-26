@@ -536,7 +536,8 @@ Stmt GemmNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
   ICHECK(clear_accum_bool.has_value())
       << "clear_accum must be a constant Bool type, got " << clear_accum;
   ss << ", " << bool(clear_accum_bool.value());
-  if ((TargetIsCuda(T.target) && (GetArchInt(T.target) >= 75)) || (TargetIsPH1(T.target))) {
+  if ((TargetIsCuda(T.target) && (GetArchInt(T.target) >= 75)) ||
+      (TargetIsPH1(T.target))) {
     ss << ", " << stride_A << ", " << stride_B;
     ss << ", " << offset_A << ", " << offset_B;
   }
@@ -569,7 +570,8 @@ Stmt GemmNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
   auto new_call = Call(DataType::Handle(), tl::tl_gemm(),
                        Array<PrimExpr>{StringImm(ss.str()), Aptr, Bptr, Cptr});
 
-  return AttrStmt(Integer(0), tl::kGemmInst, Integer(static_cast<int>(gemm_inst)), Evaluate(new_call));
+  return AttrStmt(Integer(0), tl::kGemmInst,
+                  Integer(static_cast<int>(gemm_inst)), Evaluate(new_call));
 }
 
 /**
@@ -717,26 +719,27 @@ LayoutMap GemmNode::InferLayout(const LayoutInferArgs &T,
     ICHECK(C.scope() == "local.fragment");
     ICHECK(gemm_inst == GemmInst::kSQMMA);
     // C layout
-    auto fragment = makeGemmFragmentCPH1(M, N, M / warp_m, N / warp_n,
-                                         C->dtype.bits());
+    auto fragment = makePHSqmmaFragmentC(M, N, warp_m, warp_n, C->dtype.bits());
     results.Set(C, fragment->BindThreadRange(thread_range));
 
     // A layout
     int dim_A = A->shape.size();
     const int64_t a_mat_stride = *as_const_int(A->shape[dim_A - 2]);
     const int64_t a_mat_continuous = *as_const_int(A->shape[dim_A - 1]);
-    const int64_t a_continuity = trans_A ? 4 * a_mat_continuous / warp_m : a_mat_continuous;
-    auto ALayout = makeGemmABLayoutPH1(a_mat_stride, a_mat_continuous, a_continuity,
-                                       A->dtype.bits(), !trans_A);
+    const int64_t a_continuity =
+        trans_A ? 4 * a_mat_continuous / warp_m : a_mat_continuous;
+    auto ALayout = makeGemmABLayoutPH1(a_mat_stride, a_mat_continuous,
+                                       a_continuity, A->dtype.bits(), !trans_A);
     results.Set(A, ALayout);
 
     // B layout
     int dim_B = B->shape.size();
     const int64_t b_mat_stride = *as_const_int(B->shape[dim_B - 2]);
     const int64_t b_mat_continuous = *as_const_int(B->shape[dim_B - 1]);
-    const int64_t b_continuity = trans_B ? b_mat_continuous : b_mat_continuous / warp_n;
-    auto BLayout = makeGemmABLayoutPH1(b_mat_stride, b_mat_continuous, b_continuity,
-                                       B->dtype.bits(), trans_B);
+    const int64_t b_continuity =
+        trans_B ? b_mat_continuous : b_mat_continuous / warp_n;
+    auto BLayout = makeGemmABLayoutPH1(b_mat_stride, b_mat_continuous,
+                                       b_continuity, B->dtype.bits(), trans_B);
     results.Set(B, BLayout);
   } else if (gemm_inst == GemmInst::kTCGEN5MMA) {
     ICHECK(C.scope() == "shared.tmem")
