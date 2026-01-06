@@ -16,6 +16,10 @@
 # This specific template is located at:
 # https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Getting-Started.gitlab-ci.yml
 
-workflow:
+stages: [pass]
+
+pass_pipeline:
+  stage: pass
+  script: echo "never runs"
   rules:
     - when: never
