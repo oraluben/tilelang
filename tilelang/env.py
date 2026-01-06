@@ -307,6 +307,7 @@ CUDA_HOME = env.CUDA_HOME
 ROCM_HOME = env.ROCM_HOME
 MUSA_HOME = env.MUSA_HOME
 
+
 def prepend_pythonpath(path):
     if not os.environ.get("PYTHONPATH", None):
         os.environ["PYTHONPATH"] = path
@@ -334,8 +335,6 @@ if os.environ.get("TL_CUTLASS_PATH", None) is None:
     cutlass_inc_path = os.path.join(THIRD_PARTY_ROOT, 'cutlass', 'include')
     if os.path.exists(cutlass_inc_path):
         os.environ["TL_CUTLASS_PATH"] = env.CUTLASS_INCLUDE_DIR = cutlass_inc_path
-    else:
-        logger.warning(CUTLASS_NOT_FOUND_MESSAGE)
 
 # Initialize MUTLASS paths
 if os.environ.get("TL_MUTLASS_PATH", None) is None:
@@ -350,8 +349,6 @@ if os.environ.get("TL_COMPOSABLE_KERNEL_PATH", None) is None:
     ck_inc_path = os.path.join(THIRD_PARTY_ROOT, 'composable_kernel', 'include')
     if os.path.exists(ck_inc_path):
         os.environ["TL_COMPOSABLE_KERNEL_PATH"] = env.COMPOSABLE_KERNEL_INCLUDE_DIR = ck_inc_path
-    else:
-        logger.warning(COMPOSABLE_KERNEL_NOT_FOUND_MESSAGE)
 
 # Initialize TL_TEMPLATE_PATH
 if os.environ.get("TL_TEMPLATE_PATH", None) is None:
