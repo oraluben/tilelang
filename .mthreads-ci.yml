@@ -1,0 +1,34 @@
+include:
+  - project: 'mthreads-ci-templates'
+    ref: 'add_ymal'
+    files:
+      - '.base.yml'
+      - '.install-musa.yml'
+
+variables:
+  MUSA_PATH: "/usr/local/musa/bin"
+
+.build-tilelang_musa-base:
+  extends: ".k8s-base"
+  needsSourceCode:
+    shallow: false
+    submoduleShallow: false
+  timeout: 60m
+  variables:
+    MUSA_PATH: "${MUSA_PATH:-/usr/local/musa/bin}"
+    K8S_IMAGE: "sh-harbor.mthreads.com/os-build/mt-build:developv2"   
+
+# 构建 Release 版本
+
+build-PH1:
+  extends:
+    - ".build-tilelang_musa-base"
+    - ".install-musa"
+  variables:
+    MUSA_MODULE: 'MURATIME,MUDNN,MCCL'
+  scripts:
+    - "export LD_LIBRARY_PATH=/usr/local/musa/lib:$LD_LIBRARY_PATH"
+    - "export PATH=/usr/local/musa/bin:$PATH"
+    - "export USE_MUSA=1"
+    - "cd ${WORKSPACE}/${REPO_NAME} && python -m build"
+    - "ls -lh ${WORKSPACE}/${REPO_NAME}/dist/*.whl 1>/dev/null && echo 'compile SUCCED!' || echo 'compile FAILE'"
