@@ -272,6 +272,17 @@ def LegalizeVectorizedLoop():
     return _ffi_api.LegalizeVectorizedLoop()  # type: ignore
 
 
+def VectorizeWithBoundry():
+    """LegalizeLoopVectorize
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.VectorizeWithBoundry()  # type: ignore
+
+
 def LegalizeSafeMemoryAccess():
     """LegalizeLoopVectorize
 
