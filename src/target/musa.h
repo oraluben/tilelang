@@ -61,5 +61,3 @@ inline constexpr const char *ToString(MUsmemSwizzleGranularity sg) {
     return "";
   }
 }
-
-inline constexpr int TME_DESC_SIZE = 17;

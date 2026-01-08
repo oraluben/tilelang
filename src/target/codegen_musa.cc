@@ -290,7 +290,8 @@ CodeGenTileLangMUSA::GetTMASmemBox(const PrimExpr &desc) const {
   return smem_box;
 }
 
-MUsmemSwizzleGranularity CodeGenTileLangMUSA::GetTMASwizzleGranularity(const PrimExpr &desc) const {
+MUsmemSwizzleGranularity
+CodeGenTileLangMUSA::GetTMASwizzleGranularity(const PrimExpr &desc) const {
   const auto *var = desc.as<VarNode>();
   if (!var) {
     return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
@@ -300,16 +301,16 @@ MUsmemSwizzleGranularity CodeGenTileLangMUSA::GetTMASwizzleGranularity(const Pri
     return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
   }
   const Array<PrimExpr> &args = it->second;
-  if (args.size() < TME_DESC_SIZE) {
-    return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
-  }
-  const auto *sg = args[14].as<IntImmNode>();
+  auto rank = args[3].as<IntImmNode>()->value;
+  auto desc_size = rank * 4 + 9;
+  ICHECK(args.size() == desc_size)
+      << "arg's size must be equal desc_size(i.e. rank * 4 + 9)";
+  const auto *sg = args[desc_size - 3].as<IntImmNode>();
   if (!sg) {
     return MU_SMEM_SWIZZLE_GRANULARITY_NONE;
   }
   return MUsmemSwizzleGranularity(sg->value);
 }
-
 
 std::string CodeGenTileLangMUSA::Finish() {
 
@@ -2328,8 +2329,8 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
       os << "}\n";
     } else {
       os << "for (int local_id = 0; local_id < 8; ++local_id) {\n";
-      os << dst << "[" + this->PrintExpr(dst_ind) + "]"
-         << " = " << src << "[" << src_offset << " + local_id];\n";
+      os << dst << "[" + this->PrintExpr(dst_ind) + "]" << " = " << src << "["
+         << src_offset << " + local_id];\n";
       os << "}\n";
     }
 
