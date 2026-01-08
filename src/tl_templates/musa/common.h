@@ -207,6 +207,35 @@ TL_DEVICE longlong4 make_longlong4(int x0, int x1, int y0, int y1, int z0,
 
 namespace tl {
 
+// Any
+template <typename T> TL_DEVICE bool Any(T *a, int size) {
+  for (int i = 0; i < size; i++) {
+    if (a[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// All
+template <typename T> TL_DEVICE bool All(T *a, int size) {
+  for (int i = 0; i < size; i++) {
+    if (!a[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Pow of int
+template <int y = 1, typename T> TL_DEVICE T pow_of_int(T x) {
+  T result = x;
+  for (int i = 1; i < y; i++) {
+    result *= x;
+  }
+  return result;
+}
+
 struct float_e4m3_t : public mutlass::float_e4m3_t {
   using mutlass::float_e4m3_t::float_e4m3_t;
 
@@ -229,7 +258,9 @@ struct float_e5m2_t : public mutlass::float_e5m2_t {
       : float_e5m2_t(static_cast<float>(x)) {}
 };
 
-template <typename T> struct to_mute_type { using type = T; };
+template <typename T> struct to_mute_type {
+  using type = T;
+};
 
 template <> struct to_mute_type<tl::float_e4m3_t> {
   using type = mutlass::float_e4m3_t;
