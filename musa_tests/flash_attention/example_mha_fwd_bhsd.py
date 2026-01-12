@@ -9,8 +9,10 @@ from functools import partial
 
 TARGET = "musa"
 DEVICE = "musa"
+
+
 def get_configs():
-    iter_params = dict(block_M=[128], block_N=[128], num_stages=[2], threads=[128])
+    iter_params = dict(block_M=[256], block_N=[64], num_stages=[2], threads=[512])
     return [dict(zip(iter_params, values)) for values in itertools.product(*iter_params.values())]
 
 
@@ -20,10 +22,10 @@ def flashattn(batch,
               seq_kv,
               dim,
               is_causal,
-              block_M=64,
+              block_M=256,
               block_N=64,
               num_stages=1,
-              threads=128):
+              threads=512):
     scale = (1.0 / dim)**0.5 * 1.44269504  # log2(e)
     q_shape = [batch, heads, seq_q, dim]
     kv_shape = [batch, heads, seq_kv, dim]
@@ -118,7 +120,7 @@ def flashattn(batch,
             K_shared = T.alloc_shared([block_N, dim], dtype)
             P_shared = T.alloc_shared([block_M, block_N], dtype)
             V_shared = T.alloc_shared([block_N, dim], dtype)
-            
+
             acc_s = T.alloc_fragment([block_M, block_N], accum_dtype)
             acc_s_cast = T.alloc_fragment([block_M, block_N], dtype)
             acc_o = T.alloc_fragment([block_M, dim], accum_dtype)
@@ -148,7 +150,7 @@ def flashattn(batch,
                 MMA1(V, P_shared, V_shared, acc_o, k, by, bz)
             for i, j in T.Parallel(block_M, dim):
                 acc_o[i, j] /= logsum[i]
-            
+
             T.copy(acc_o, Output[bz, by, bx * block_M:(bx + 1) * block_M, :])
 
     return main
@@ -175,7 +177,7 @@ def main(
     heads: int = 1,
     seq_q: int = 256,
     seq_kv: int = 256,
-    dim: int = 64,
+    dim: int = 128,
     is_causal: bool = False,
     tune: bool = False,
     verbose: bool = False,
@@ -194,10 +196,10 @@ def main(
             seq_kv,
             dim,
             is_causal,
-            block_M=64,
+            block_M=256,
             block_N=64,
             num_stages=1,
-            threads=128)
+            threads=512)
         dtype = "float16"
         pass_configs = {
             tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
@@ -227,17 +229,17 @@ def main(
         torch.testing.assert_close(output, ref_output, rtol=1e-2, atol=1e-2)
         print("All checks pass.")
 
-        # ref_program_processed = partial(ref_program, is_causal=is_causal)
+        ref_program_processed = partial(ref_program, is_causal=is_causal)
 
-        # profiler = kernel.get_profiler()
-        # profiler.assert_allclose(ref_program_processed, rtol=0.01, atol=0.01)
+        profiler = kernel.get_profiler()
+        profiler.assert_allclose(ref_program_processed, rtol=0.01, atol=0.01)
         # print("All checks pass.")
-        # latency = profiler.do_bench(ref_program_processed, warmup=5)
-        # print("Ref: {:.2f} ms".format(latency))
-        # print("Ref: {:.2f} TFlops".format(total_flops / latency * 1e-9))
-        # latency = profiler.do_bench(warmup=5)
-        # print("Tile-lang: {:.2f} ms".format(latency))
-        # print("Tile-lang: {:.2f} TFlops".format(total_flops / latency * 1e-9))
+        latency = profiler.do_bench(ref_program_processed, warmup=5)
+        print(f"Ref: {latency:.2f} ms")
+        print(f"Ref: {total_flops / latency * 1e-9:.2f} TFlops")
+        latency = profiler.do_bench(warmup=5)
+        print(f"Tile-lang: {latency:.2f} ms")
+        print(f"Tile-lang: {total_flops / latency * 1e-9:.2f} TFlops")
     else:
         kernel = flashattn(batch, heads, seq_q, seq_kv, dim, is_causal)
         best_latency = kernel.latency
@@ -251,13 +253,14 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch', type=int, default=1, help='batch size')
-    parser.add_argument('--heads', type=int, default=1, help='heads')
-    parser.add_argument('--seq_q', type=int, default=256, help='query sequence length')
-    parser.add_argument('--seq_kv', type=int, default=256, help='key/value sequence length')
-    parser.add_argument('--dim', type=int, default=64, help='dim')
+    parser.add_argument('--batch', type=int, default=4, help='batch size')
+    parser.add_argument('--heads', type=int, default=8, help='heads')
+    parser.add_argument('--seq_q', type=int, default=4096, help='query sequence length')
+    parser.add_argument('--seq_kv', type=int, default=4096, help='key/value sequence length')
+    parser.add_argument('--dim', type=int, default=128, help='dim')
     parser.add_argument('--is_causal', action='store_true', help='causal')
     parser.add_argument('--tune', action='store_true', help='tune configs')
     parser.add_argument("--verbose", action="store_true", default=False)
     args = parser.parse_args()
-    main(args.batch, args.heads, args.seq_q, args.seq_kv, args.dim, args.is_causal, args.tune, args.verbose)
+    main(args.batch, args.heads, args.seq_q, args.seq_kv, args.dim, args.is_causal, args.tune,
+         args.verbose)
