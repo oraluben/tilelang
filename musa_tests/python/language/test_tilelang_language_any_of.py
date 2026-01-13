@@ -103,8 +103,6 @@ def blocksparse_matmul_shared(
             for k in T.Pipelined(T.ceildiv(K, block_K), num_stages=2):
                 for i in T.serial(condition_dim):
                     block_mask_shared[i] = BlockMask[by, bx, k, i]
-                # or T.any_of(block_mask_local[0:condition_dim])
-                # or T.any_of(block_mask_local[:])
                 if T.any_of(block_mask_shared):
                     T.copy(A[by * block_M, k * block_K], A_shared)
                     T.copy(B[k * block_K, bx * block_N], B_shared)
@@ -175,8 +173,8 @@ def run_block_sparse_matmul_global(M=1024, N=1024, K=1024, sparsity=0.5, conditi
     enable_rasteration = True
 
     # Initialize input matrices A and B on the GPU with half precision
-    a = torch.randn(M, K).musa().half()
-    b = torch.randn(K, N).musa().half()
+    a = torch.randn(M, K).half()
+    b = torch.randn(K, N).half()
 
     func = blocksparse_matmul_global(
         M,
@@ -192,19 +190,16 @@ def run_block_sparse_matmul_global(M=1024, N=1024, K=1024, sparsity=0.5, conditi
     )
     kernel = tilelang.compile(func, out_idx=-1)
     # Create block mask with desired sparsity
-    mask_shape = (M // block_M, N // block_N, K // block_K)
-    block_mask = torch.rand(mask_shape).musa() > sparsity
-    block_mask = block_mask.view(mask_shape + (1,)).repeat(1, 1, 1, condition_dim)
-    # random set the last dimension to be False
-    block_mask[:, :, :, 0] = False
+    mask_shape = (M // block_M, N // block_N, K // block_K, condition_dim)
+    block_mask = torch.rand(mask_shape) > sparsity
 
     # Run the compiled kernel (either tuned or default) with the inputs
-    c = kernel(a, b, block_mask)
+    c = kernel(a.musa(), b.musa(), block_mask.musa())
 
     # Compute the reference result using the naive PyTorch implementation
     ref_c = ref_program(a, b, block_mask, block_M, block_N, block_K)
 
-    torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(c.cpu(), ref_c, rtol=1e-2, atol=1e-2)
 
 
 def run_block_sparse_matmul_shared(M=1024, N=1024, K=1024, sparsity=0.5, condition_dim=2):
@@ -216,8 +211,8 @@ def run_block_sparse_matmul_shared(M=1024, N=1024, K=1024, sparsity=0.5, conditi
     enable_rasteration = True
 
     # Initialize input matrices A and B on the GPU with half precision
-    a = torch.randn(M, K).musa().half()
-    b = torch.randn(K, N).musa().half()
+    a = torch.randn(M, K).half()
+    b = torch.randn(K, N).half()
 
     func = blocksparse_matmul_shared(
         M,
@@ -239,19 +234,16 @@ def run_block_sparse_matmul_shared(M=1024, N=1024, K=1024, sparsity=0.5, conditi
             tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
         })
     # Create block mask with desired sparsity
-    mask_shape = (M // block_M, N // block_N, K // block_K)
-    block_mask = torch.rand(mask_shape).musa() > sparsity
-    block_mask = block_mask.view(mask_shape + (1,)).repeat(1, 1, 1, condition_dim)
-    # random set the last dimension to be False
-    block_mask[:, :, :, 0] = False
+    mask_shape = (M // block_M, N // block_N, K // block_K, condition_dim)
+    block_mask = torch.rand(mask_shape) > sparsity
 
     # Run the compiled kernel (either tuned or default) with the inputs
-    c = kernel(a, b, block_mask)
+    c = kernel(a.musa(), b.musa(), block_mask.musa())
 
     # Compute the reference result using the naive PyTorch implementation
     ref_c = ref_program(a, b, block_mask, block_M, block_N, block_K)
 
-    torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(c.cpu(), ref_c, rtol=1e-2, atol=1e-2)
 
 
 def run_block_sparse_matmul_local(M=1024, N=1024, K=1024, sparsity=0.5, condition_dim=2):
@@ -263,8 +255,8 @@ def run_block_sparse_matmul_local(M=1024, N=1024, K=1024, sparsity=0.5, conditio
     enable_rasteration = True
 
     # Initialize input matrices A and B on the GPU with half precision
-    a = torch.randn(M, K).musa().half()
-    b = torch.randn(K, N).musa().half()
+    a = torch.randn(M, K).half()
+    b = torch.randn(K, N).half()
 
     func = blocksparse_matmul_local(
         M,
@@ -286,19 +278,16 @@ def run_block_sparse_matmul_local(M=1024, N=1024, K=1024, sparsity=0.5, conditio
             tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
         })
     # Create block mask with desired sparsity
-    mask_shape = (M // block_M, N // block_N, K // block_K)
-    block_mask = torch.rand(mask_shape).musa() > sparsity
-    block_mask = block_mask.view(mask_shape + (1,)).repeat(1, 1, 1, condition_dim)
-    # random set the last dimension to be False
-    block_mask[:, :, :, 0] = False
+    mask_shape = (M // block_M, N // block_N, K // block_K, condition_dim)
+    block_mask = torch.rand(mask_shape) > sparsity
 
     # Run the compiled kernel (either tuned or default) with the inputs
-    c = kernel(a, b, block_mask)
+    c = kernel(a.musa(), b.musa(), block_mask.musa())
 
     # Compute the reference result using the naive PyTorch implementation
     ref_c = ref_program(a, b, block_mask, block_M, block_N, block_K)
 
-    torch.testing.assert_close(c, ref_c, rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(c.cpu(), ref_c, rtol=1e-2, atol=1e-2)
 
 
 def test_block_sparse_matmul_global():

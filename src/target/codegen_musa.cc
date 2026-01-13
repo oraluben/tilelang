@@ -930,7 +930,7 @@ void CodeGenTileLangMUSA::PrintStorageScope(const std::string &scope,
   if (scope == "shared" || scope == "shared.barrier") {
     os << "__shared__ ";
   } else if (scope == "shared.dyn") {
-    os << "extern __shared__ __align__(1024) ";
+    os << "extern __shared__ __align__(4096) ";
   }
 }
 
