@@ -9,6 +9,8 @@ from functools import lru_cache
 ROOT = Path(__file__).parent
 
 base_version = (ROOT / 'VERSION').read_text().strip()
+patch_version_file = ROOT / 'VERSION_PATCH'
+patch_version = patch_version_file.read_text().strip() if patch_version_file.exists() else None
 # When installing a sdist,
 # the installed version needs to match the sdist version,
 # so pip will complain when we install `tilelang-0.1.6.post2+gitxxxx.tar.gz`.
@@ -78,6 +80,8 @@ def dynamic_metadata(
                 backend = 'cuda'
         if backend:
             exts.append(backend)
+            if patch_version:
+                exts.append(patch_version)
 
         if _read_cmake_bool(os.environ.get('NO_GIT_VERSION')):
             pass
