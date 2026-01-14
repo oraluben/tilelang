@@ -1533,13 +1533,6 @@ void CodeGenTileLangMUSA::VisitExpr_(const CallNode *op, std::ostream &os) {
     auto warp_count = "((" + arrive_count + " + 31) / 32)";
     this->stream << "__musa_async_init_arrival(" << mbarrier_id << ", "
                  << warp_count << ", 0);\n";
-  } else if (op->op.same_as(tl::musa_sync())) {
-    ICHECK_EQ(op->args.size(), 2);
-    this->PrintIndent();
-    auto mbarrier_id = print_mbarrier_id(op->args[0]);
-    this->stream << "__musa_async_arrive(" << mbarrier_id << ");\n";
-    this->PrintIndent();
-    this->stream << "__musa_async_wait(" << mbarrier_id << ", 0);\n";
   } else if (op->op.same_as(builtin::ptx_arrive_barrier_expect_tx())) {
     if (op->args.size() == 2) {
       auto mbarrier_id = print_mbarrier_id(op->args[0]);

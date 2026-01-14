@@ -4,6 +4,7 @@
  */
 #include "../op/builtin.h"
 #include "tvm/runtime/logging.h"
+#include "tvm/tir/buffer.h"
 #include "tvm/tir/builtin.h"
 #include "tvm/tir/expr.h"
 #include "tvm/tir/op.h"
@@ -227,6 +228,57 @@ private:
   }
 };
 
+class MusaSyncPhaseRewriter : public StmtExprMutator {
+public:
+  Stmt Rewrite(Stmt body) {
+    body = this->VisitStmt(std::move(body));
+    for (auto it = phase_vars_.rbegin(); it != phase_vars_.rend(); ++it) {
+      const Buffer &buf = *it;
+      body = DeclBuffer(buf, body);
+      Map<String, ffi::Any> annotations;
+      annotations.Set(tl::attr::kLocalVarInit, IntImm(DataType::Int(32), 0));
+      body = Allocate(buf->data, buf->dtype, buf->shape,
+                      const_true(buf->dtype.lanes()), body, annotations);
+    }
+    return body;
+  }
+
+private:
+  Stmt VisitStmt_(const EvaluateNode *op) final {
+    if (const auto *call = op->value.as<CallNode>()) {
+      if (call->op.same_as(tl::musa_sync())) {
+        return RewriteMusaSync(call);
+      }
+    }
+    return StmtExprMutator::VisitStmt_(op);
+  }
+
+  Stmt RewriteMusaSync(const CallNode *call) {
+    ICHECK_EQ(call->args.size(), 2);
+    Buffer phase_buf = MakePhaseVar();
+    phase_vars_.push_back(phase_buf);
+    Array<PrimExpr> indices = {IntImm(DataType::Int(32), 0)};
+    PrimExpr phase = BufferLoad(phase_buf, indices);
+    PrimExpr barrier = VisitExpr(call->args[0]);
+    Stmt arrive = Evaluate(
+        Call(DataType::Handle(), builtin::ptx_arrive_barrier(), {barrier}));
+    Stmt wait = Evaluate(
+        Call(DataType::Handle(), mbarrier_wait_parity(), {barrier, phase}));
+    PrimExpr next_phase = bitwise_xor(phase, IntImm(DataType::Int(32), 1));
+    Stmt store = BufferStore(phase_buf, next_phase, indices);
+    return SeqStmt::Flatten(arrive, wait, store);
+  }
+
+  Buffer MakePhaseVar() {
+    std::string name =
+        "__musa_sync_phase_" + std::to_string(phase_vars_.size());
+    Array<PrimExpr> shape = {IntImm(DataType::Int(32), 1)};
+    return decl_buffer(shape, DataType::Int(32), name, "local.var");
+  }
+
+  std::vector<Buffer> phase_vars_;
+};
+
 PrimFunc RewritePartialSyncToBarrier(PrimFunc f) {
   auto *n = f.CopyOnWrite();
 
@@ -275,6 +327,7 @@ PrimFunc RewritePartialSyncToBarrier(PrimFunc f) {
 
   body = CreateBarrierRewriter::Rewrite(std::move(body),
                                         base_count + prepass.sync_count());
+  body = MusaSyncPhaseRewriter().Rewrite(std::move(body));
 
   n->body = std::move(body);
   return f;
