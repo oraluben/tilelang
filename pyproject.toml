@@ -27,7 +27,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-    "apache-tvm-ffi @ file:./3rdparty/tvm/3rdparty/tvm-ffi",
+    "apache-tvm-ffi==0.1.0",
     "cloudpickle",
     "ml-dtypes",
     "numpy<2",
