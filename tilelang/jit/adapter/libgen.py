@@ -22,6 +22,20 @@ from .utils import is_cpu_target, is_cuda_target, is_hip_target, is_musa_target
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_mcc_extra_args() -> list[str]:
+    raw = os.environ.get("TILELANG_MCC_EXTRA_ARGS")
+    if not raw:
+        return []
+    args: list[str] = []
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        args.append(chunk)
+    return args
+
+
 try:
     from tilelang.jit.adapter.nvrtc import is_nvrtc_available
     if is_nvrtc_available:
@@ -118,7 +132,7 @@ class LibraryGenerator:
             src = tempfile.NamedTemporaryFile(mode="w", suffix=".mu", delete=False)  # noqa: SIM115
             target_arch = get_musa_arch(get_musa_compute_version(target))
             libpath = src.name.replace(".mu", ".so")
-
+            opt_level = os.environ.get("TILELANG_OPT_LEVEL")
             command = [
                 get_mcc_compiler(),
                 src.name,
@@ -128,9 +142,16 @@ class LibraryGenerator:
                 # "-lmusart",
                 # "-lmusa",
                 f"--offload-arch=mp_{target_arch}",
-                "-I" + MUTLASS_INCLUDE_DIR,
+            ]
+            if opt_level:
+                command += ["-Od3"]
+            command += [
                 "-mllvm",
-                "-mtgpu-alloc-shared-memory-from-zero=1"
+                "-mtgpu-alloc-shared-memory-from-zero=1",
+            ]
+            command += _parse_mcc_extra_args()
+            command += [
+                "-I" + MUTLASS_INCLUDE_DIR,
             ]
 
         elif is_hip_target(target):
