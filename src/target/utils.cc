@@ -15,7 +15,7 @@ bool TargetIsCuda(Target target) {
   return target->GetTargetDeviceType() == kDLCUDA;
 }
 bool TargetIsMusa(Target target) {
-  return target->GetTargetDeviceType() == kDLMUSA;
+  return target->GetTargetDeviceType() == kDLExtDev;
 }
 bool TargetIsRocm(Target target) {
   return target->GetTargetDeviceType() == kDLROCM;
