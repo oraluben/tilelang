@@ -1,8 +1,59 @@
 #pragma once
 
 #include "common.h"
+#include "mutlass/mutlass.h"
 
 namespace tl {
+
+namespace detail {
+
+// Provide architecture-specific defaults so callers may omit arguments.
+TL_DEVICE constexpr int default_warp_size() {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_DEVICE_COMPILE__)
+  return 64;
+#else
+  return 32;
+#endif
+}
+
+TL_DEVICE constexpr int default_warps_per_group() { return 4; }
+
+TL_DEVICE int linear_thread_idx_in_block() {
+#if defined(__CUDA_ARCH__) || defined(__MUSA_ARCH__) ||                        \
+    defined(__HIP_DEVICE_COMPILE__)
+  return threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
+#else
+  return 0;
+#endif
+}
+
+} // namespace detail
+
+TL_DEVICE int get_lane_idx(int warp_size = detail::default_warp_size()) {
+  warp_size = warp_size > 0 ? warp_size : detail::default_warp_size();
+  return detail::linear_thread_idx_in_block() % warp_size;
+}
+
+TL_DEVICE int get_warp_idx_sync(int warp_size = detail::default_warp_size()) {
+  warp_size = warp_size > 0 ? warp_size : detail::default_warp_size();
+  return detail::linear_thread_idx_in_block() / warp_size;
+}
+
+TL_DEVICE int get_warp_idx(int warp_size = detail::default_warp_size()) {
+  warp_size = warp_size > 0 ? warp_size : detail::default_warp_size();
+  return detail::linear_thread_idx_in_block() / warp_size;
+}
+
+TL_DEVICE int
+get_warp_group_idx(int warp_size = detail::default_warp_size(),
+                   int warps_per_group = detail::default_warps_per_group()) {
+  warp_size = warp_size > 0 ? warp_size : detail::default_warp_size();
+  warps_per_group =
+      warps_per_group > 0 ? warps_per_group : detail::default_warps_per_group();
+  int threads_per_group = warp_size * warps_per_group;
+  threads_per_group = threads_per_group > 0 ? threads_per_group : warp_size;
+  return detail::linear_thread_idx_in_block() / threads_per_group;
+}
 
 // Elect one thread in the warp. The elected thread gets its predicate set to
 // true, all others obtain false.
@@ -54,7 +105,8 @@ template <int thread_extent> TL_DEVICE bool tl_shuffle_elect() {
   // lanes in the warp. Here it broadcasts the group-local warp index from lane
   // 0. Comparing to 0 selects only the group's warp 0.
   return __shfl_sync(0xffffffff, // full warp mask
-                     (threadIdx.x / 32) % (thread_extent / 32), // warp index within group
+                     (threadIdx.x / 32) %
+                         (thread_extent / 32), // warp index within group
                      0                         // take the value from lane 0
                      ) == 0 &&
          // Within that group leader warp, elect exactly one lane (typically
