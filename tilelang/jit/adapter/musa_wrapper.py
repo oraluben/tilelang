@@ -1,3 +1,4 @@
+from __future__ import annotations
 from tvm import IRModule
 from tvm.target import Target
 from tilelang import tvm as tvm
@@ -5,7 +6,6 @@ from typing import Any
 import re
 from .utils import match_declare_kernel, get_annotated_mod, pythonic_expr
 from tvm.tir.stmt_functor import post_order_visit
-
 
 PREDEF_INIT_FUNC = """
 #define ERROR_BUF_SIZE 1024
@@ -118,6 +118,7 @@ TMA_IM2COL_DESC_INIT_FUNC = """
 \t}}
 """
 
+
 class TLMUSASourceWrapper:
     _TYPE_MAP = {
         "float32": "float",
@@ -128,6 +129,7 @@ class TLMUSASourceWrapper:
         "float64": "double",
         "int64": "int64_t",
         "int32": "int",
+        "uint64": "muuint64_t",
         "uint32": "unsigned int",
         "bool": "int8_t",
         "int8": "int8_t",
@@ -366,10 +368,7 @@ class TLMUSASourceWrapper:
                 box_dim = remaining_args[2 * tensor_rank:3 * tensor_rank]
                 element_strides = remaining_args[3 * tensor_rank:4 * tensor_rank]
 
-                global_dim = [
-                    f"static_cast<muuint64_t>({self._pythonic_expr(i)})"
-                    for i in global_dim
-                ]
+                global_dim = [self._pythonic_expr(i) for i in global_dim]
                 global_stride = [self._pythonic_expr(i) for i in global_stride]
                 box_dim = [self._pythonic_expr(i) for i in box_dim]
                 element_strides = [self._pythonic_expr(i) for i in element_strides]
@@ -626,5 +625,3 @@ class TLMUSASourceWrapper:
                 if "tir.is_global_func" in attr and attr["tir.is_global_func"]:
                     return function
             raise ValueError("Cannot find primary function in the module.")
-
-

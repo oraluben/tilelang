@@ -18,7 +18,7 @@ def matmul_test(M, N, K, block_M, block_N, block_K, dtype="float16", accum_dtype
         k: T.int32,
     ):
         A = T.make_tensor(a_ptr, (m, k), dtype)
-        B = T.make_tensor(b_ptr, (k, n), dtype)
+        B = T.make_tensor(b_ptr, (n, k), dtype)
         C = T.make_tensor(c_ptr, (m, n), accum_dtype)
 
         # Initialize Kernel Context
@@ -60,7 +60,7 @@ def run_matmul(M, N, K, block_M, block_N, block_K, dtype="float16", accum_dtype=
 
 
 def test_matmul():
-    run_matmul(1024, 1024, 1024, 128, 128, 32)
+    run_matmul(1024, 512, 1024, 128, 128, 32)
 
 
 if __name__ == "__main__":

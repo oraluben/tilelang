@@ -1465,8 +1465,10 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
   // The first stride element should be 1
   ICHECK(is_one(desc.global_stride[0])) << desc.global_stride;
   // Make global stride in bytes
+  auto stride_dtype =
+      TargetIsMusa(T.target) ? DataType::UInt(64) : DataType::Int(64);
   desc.global_stride = desc.global_stride.Map([&](PrimExpr e) {
-    return cast(DataType::Int(64), e) * global_tensor->dtype.bytes();
+    return cast(stride_dtype, e) * global_tensor->dtype.bytes();
   });
   for (size_t i{1}; i < desc.global_stride.size(); i++) {
     auto stride = desc.global_stride[i].as<IntImmNode>();
@@ -1681,6 +1683,11 @@ Stmt CopyNode::LowerBulkCopy(const LowerArgs &T, arith::Analyzer *analyzer,
         return LowerNormalCopy(T, analyzer);
       }
     }
+  }
+
+  if (TargetIsMusa(T.target)) {
+    desc.global_shape = desc.global_shape.Map(
+        [](PrimExpr e) { return cast(DataType::UInt(64), e); });
   }
 
   Call create_descriptor =
@@ -2000,9 +2007,10 @@ Stmt Conv2DIm2ColOpNode::Lower(const LowerArgs &T,
   // The first stride element should be 1
   ICHECK(is_one(desc.global_stride[0])) << desc.global_stride;
   // Make global stride in bytes
-  desc.global_stride = desc.global_stride.Map([&](PrimExpr e) {
-    return cast(DataType::Int(64), e) * src->dtype.bytes();
-  });
+  auto stride_dtype =
+      TargetIsMusa(T.target) ? DataType::UInt(64) : DataType::Int(64);
+  desc.global_stride = desc.global_stride.Map(
+      [&](PrimExpr e) { return cast(stride_dtype, e) * src->dtype.bytes(); });
   desc.elem_stride = {1, stride, stride, 1};
   desc.lower_corner = {-padding, -padding};
   desc.upper_corner = {-padding, -padding};
@@ -2038,9 +2046,6 @@ Stmt Conv2DIm2ColOpNode::Lower(const LowerArgs &T,
     }
   }
 
-  Call create_desc = Call(DataType::Handle(), create_tma_im2col_descriptor(),
-                          desc.EncodeCallArgs());
-
   Array<PrimExpr> global_coords; // c, w, h, n
   Array<PrimExpr> image_offset;  // w, h
   global_coords.reserve(desc.rank);
@@ -2074,6 +2079,14 @@ Stmt Conv2DIm2ColOpNode::Lower(const LowerArgs &T,
       padding);
   global_coords.push_back(
       FloorDiv(nhw_step * desc.smem_box_pixel, w_dim * h_dim));
+
+  if (TargetIsMusa(T.target)) {
+    desc.global_shape = desc.global_shape.Map(
+        [](PrimExpr e) { return cast(DataType::UInt(64), e); });
+  }
+
+  Call create_desc = Call(DataType::Handle(), create_tma_im2col_descriptor(),
+                          desc.EncodeCallArgs());
 
   Array<PrimExpr> args;
   args.reserve(desc.rank * 2 + 2);
