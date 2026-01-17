@@ -73,8 +73,40 @@ def run_vectorized_cast(src_dtype_str: str, dst_dtype_str: str, check_str: str, 
     code = kernel.get_kernel_source()
     code_parallel = kernel_parallel.get_kernel_source()
 
-    assert check_str in code and check_str in code_parallel, \
-        f"Cast {src_dtype_str} to {dst_dtype_str} with {lanes=} is not vectorized!"
+    assert (check_str in code and check_str in code_parallel
+           ), f"Cast {src_dtype_str} to {dst_dtype_str} with {lanes=} is not vectorized!"
+
+
+def run_vectorized_cast_fp8(src_dtype_str: str, dst_dtype_str: str, check_str: str, lanes: int = 2):
+    """Run the vectorized cast kernel and check the correctness.
+    Args:
+        src_dtype_str: The source data type string.
+        dst_dtype_str: The destination data type string.
+        check_str: Used to ensure vectorized cast is used.
+        lanes: The number of lanes of the source and destination data types.
+    """
+
+    M = 128 * lanes
+    kernel = vectorized_cast_kernel(M, src_dtype_str, dst_dtype_str)
+    kernel_parallel = parallel_vectorized_cast_kernel(M, src_dtype_str, dst_dtype_str)
+
+    A = torch.randn(M, dtype=str2dtype[src_dtype_str]).musa()
+    B = torch.zeros(M, dtype=str2dtype[dst_dtype_str]).musa()
+    C = torch.zeros(M, dtype=str2dtype[dst_dtype_str]).musa()
+
+    kernel(A, B)
+    kernel_parallel(A, C)
+
+    code = kernel.get_kernel_source()
+    code_parallel = kernel_parallel.get_kernel_source()
+
+    A_fp8 = A.to(str2dtype[dst_dtype_str])
+    expected = A_fp8.to(torch.float32)
+    torch.testing.assert_close(B.to(torch.float32), expected, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(C.to(torch.float32), expected, rtol=0.0, atol=0.0)
+
+    assert (check_str in code and check_str in code_parallel
+           ), f"Cast {src_dtype_str} to {dst_dtype_str} with {lanes=} is not vectorized!"
 
 
 def test_vectorized_cast():
@@ -86,14 +118,6 @@ def test_vectorized_cast():
     run_vectorized_cast("float16", "float32", "__half22float2", 2)
     run_vectorized_cast("float16", "float32", "__half22float2", 4)
 
-    # fp32 -> fp8_e4m3
-    run_vectorized_cast("float32", "float8_e4m3", "__nv_cvt_float2_to_fp8x2", 2)
-    run_vectorized_cast("float32", "float8_e4m3", "__nv_cvt_float2_to_fp8x2", 4)
-
-    # fp32 -> fp8_e5m2
-    run_vectorized_cast("float32", "float8_e5m2", "__nv_cvt_float2_to_fp8x2", 2)
-    run_vectorized_cast("float32", "float8_e5m2", "__nv_cvt_float2_to_fp8x2", 4)
-
     # fp32 -> bf16
     run_vectorized_cast("float32", "bfloat16", "__float22bfloat162_rn", 2)
     run_vectorized_cast("float32", "bfloat16", "__float22bfloat162_rn", 4)
@@ -101,6 +125,16 @@ def test_vectorized_cast():
     # bf16 -> fp32
     run_vectorized_cast("bfloat16", "float32", "__bfloat1622float2", 2)
     run_vectorized_cast("bfloat16", "float32", "__bfloat1622float2", 4)
+
+
+def test_vectorized_cast_fp8():
+    # fp32 -> fp8_e4m3
+    run_vectorized_cast_fp8("float32", "float8_e4m3", "__musa_cvt_float2_to_fp8x2", 2)
+    run_vectorized_cast_fp8("float32", "float8_e4m3", "__musa_cvt_float2_to_fp8x2", 4)
+
+    # fp32 -> fp8_e5m2
+    run_vectorized_cast_fp8("float32", "float8_e5m2", "__musa_cvt_float2_to_fp8x2", 2)
+    run_vectorized_cast_fp8("float32", "float8_e5m2", "__musa_cvt_float2_to_fp8x2", 4)
 
 
 if __name__ == "__main__":

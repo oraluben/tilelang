@@ -160,7 +160,7 @@ std::string GetFP6Type(DataType type) {
     LOG(FATAL)
         << "Only support scalar and vector types of width (2, 4) for FP6";
   }
-  stream << "__nv_fp6";
+  stream << "__mt_fp6";
   std::string suffix;
   if (type.code() == DataType::kFloat6_e2m3fn) {
     suffix = "_e2m3";
@@ -191,7 +191,7 @@ std::string GetFP4Type(DataType type) {
     LOG(FATAL)
         << "Only support scalar and vector types of width (2, 4) for FP4";
   }
-  stream << "__nv_fp4";
+  stream << "__mt_fp4";
   std::string suffix;
   if (type.code() == DataType::kFloat4_e2m1fn) {
     suffix = "_e2m1";
@@ -1133,59 +1133,59 @@ void CodeGenTileLangMUSA::VisitExpr_(const CastNode *op, std::ostream &os) {
   // Handle conversion from float32 to float8 (E4M3/E5M2)
   if (from_ty.is_float() &&
       (target_ty.is_float8_e4m3() || target_ty.is_float8_e5m2())) {
-    // FP32 -> FP8: Use __nv_cvt_float2_to_fp8x2 for vectorized conversion
+    // FP32 -> FP8: Use __musa_cvt_float2_to_fp8x2 for vectorized conversion
     // (float2 -> fp8x2)
     if (from_ty.lanes() == 2 && target_ty.lanes() == 2) {
       // float2 -> fp8x2
       PrintIndent();
-      stream << "*reinterpret_cast<__nv_fp8x2_storage_t*>(&(" << sret
-             << ")) = __nv_cvt_float2_to_fp8x2(*reinterpret_cast<float2*>(&("
-             << src << ")), __NV_SATFINITE, "
-             << (target_ty.is_float8_e4m3() ? "__NV_E4M3" : "__NV_E5M2")
+      stream << "*reinterpret_cast<__mt_fp8x2_storage_t*>(&(" << sret
+             << ")) = __musa_cvt_float2_to_fp8x2(*reinterpret_cast<float2*>(&("
+             << src << ")), __MT_SATFINITE, "
+             << (target_ty.is_float8_e4m3() ? "__MT_E4M3" : "__MT_E5M2")
              << ");\n";
       os << sret;
       return;
     } else if (from_ty.lanes() == 4 && target_ty.lanes() == 4) {
       // float4 -> fp8x4
       PrintIndent();
-      stream << "((__nv_fp8x2_storage_t*)(&" << sret << "))[0] = "
-             << "__nv_cvt_float2_to_fp8x2(*(float2*)(&(" << src
-             << ")), __NV_SATFINITE, "
-             << (target_ty.is_float8_e4m3() ? "__NV_E4M3" : "__NV_E5M2")
+      stream << "((__mt_fp8x2_storage_t*)(&" << sret << "))[0] = "
+             << "__musa_cvt_float2_to_fp8x2(*(float2*)(&(" << src
+             << ")), __MT_SATFINITE, "
+             << (target_ty.is_float8_e4m3() ? "__MT_E4M3" : "__MT_E5M2")
              << ");\n";
       PrintIndent();
-      stream << "((__nv_fp8x2_storage_t*)(&" << sret << "))[1] = "
-             << "__nv_cvt_float2_to_fp8x2(*((float2*)(&(" << src
-             << "))+1), __NV_SATFINITE, "
-             << (target_ty.is_float8_e4m3() ? "__NV_E4M3" : "__NV_E5M2")
+      stream << "((__mt_fp8x2_storage_t*)(&" << sret << "))[1] = "
+             << "__musa_cvt_float2_to_fp8x2(*((float2*)(&(" << src
+             << "))+1), __MT_SATFINITE, "
+             << (target_ty.is_float8_e4m3() ? "__MT_E4M3" : "__MT_E5M2")
              << ");\n";
       os << sret;
       return;
     } else if (from_ty.lanes() == 8 && target_ty.lanes() == 8) {
       // float8 -> fp8x8
       PrintIndent();
-      stream << "((__nv_fp8x2_storage_t*)(&" << sret << "))[0] = "
-             << "__nv_cvt_float2_to_fp8x2(*(float2*)(&(" << src
-             << ")), __NV_SATFINITE, "
-             << (target_ty.is_float8_e4m3() ? "__NV_E4M3" : "__NV_E5M2")
+      stream << "((__mt_fp8x2_storage_t*)(&" << sret << "))[0] = "
+             << "__musa_cvt_float2_to_fp8x2(*(float2*)(&(" << src
+             << ")), __MT_SATFINITE, "
+             << (target_ty.is_float8_e4m3() ? "__MT_E4M3" : "__MT_E5M2")
              << ");\n";
       PrintIndent();
-      stream << "((__nv_fp8x2_storage_t*)(&" << sret << "))[1] = "
-             << "__nv_cvt_float2_to_fp8x2(*((float2*)(&(" << src
-             << "))+1), __NV_SATFINITE, "
-             << (target_ty.is_float8_e4m3() ? "__NV_E4M3" : "__NV_E5M2")
+      stream << "((__mt_fp8x2_storage_t*)(&" << sret << "))[1] = "
+             << "__musa_cvt_float2_to_fp8x2(*((float2*)(&(" << src
+             << "))+1), __MT_SATFINITE, "
+             << (target_ty.is_float8_e4m3() ? "__MT_E4M3" : "__MT_E5M2")
              << ");\n";
       PrintIndent();
-      stream << "((__nv_fp8x2_storage_t*)(&" << sret << "))[2] = "
-             << "__nv_cvt_float2_to_fp8x2(*((float2*)(&(" << src
-             << "))+2), __NV_SATFINITE, "
-             << (target_ty.is_float8_e4m3() ? "__NV_E4M3" : "__NV_E5M2")
+      stream << "((__mt_fp8x2_storage_t*)(&" << sret << "))[2] = "
+             << "__musa_cvt_float2_to_fp8x2(*((float2*)(&(" << src
+             << "))+2), __MT_SATFINITE, "
+             << (target_ty.is_float8_e4m3() ? "__MT_E4M3" : "__MT_E5M2")
              << ");\n";
       PrintIndent();
-      stream << "((__nv_fp8x2_storage_t*)(&" << sret << "))[3] = "
-             << "__nv_cvt_float2_to_fp8x2(*((float2*)(&(" << src
-             << "))+3), __NV_SATFINITE, "
-             << (target_ty.is_float8_e4m3() ? "__NV_E4M3" : "__NV_E5M2")
+      stream << "((__mt_fp8x2_storage_t*)(&" << sret << "))[3] = "
+             << "__musa_cvt_float2_to_fp8x2(*((float2*)(&(" << src
+             << "))+3), __MT_SATFINITE, "
+             << (target_ty.is_float8_e4m3() ? "__MT_E4M3" : "__MT_E5M2")
              << ");\n";
       os << sret;
       return;
