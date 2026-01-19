@@ -192,54 +192,85 @@ class TVMFFIKernelAdapter(BaseKernelAdapter):
                 expected_dtype_strs.append(None)
                 is_buffer_param.append(False)
 
+        # Validate input count strictly
+        expected_inputs = len(self.params) - len(self.result_idx)
+
+        """
+        Instructions to construct `tensor_list`.
+        (0, j, i) => tensor_list[j] = input[i]
+        (1, j, shapes, dtype) => tensor_list[j] = torch.empty(*shapes, dtype)
+        (2, j, get_shapes, dtype) => tensor_list[j] = torch.empty(*get_shapes(input, tensor_list), dtype)
+        """
+        instructions = [(0, i, j) for i, j in enumerate([j for j in range(len(self.params)) if j not in self.result_idx])]
+
+        # Prepare input and output tensors
+        for i in range(len(self.params)):
+            if all(not isinstance(s, tir.Var) for s in param_shapes[i]):
+                assert all(isinstance(s, int) for s in param_shapes[i])
+                instructions.append((1, i, param_shapes[i], param_dtypes[i]))
+                continue
+
+            # param_shapes[i] contains symbolic value
+            def meta_gen_shape(param_shapes_):
+                static_shape = [0 for _ in param_shapes_]
+                shape_updaters = []
+                for i, s in enumerate(param_shapes_):
+                    if isinstance(s, tir.Var):
+                        for k, v in dynamic_symbolic_map.items():
+                            if str(s) == str(k):
+                                ref_id, ref_tensor_idx, ref_shape_idx = v
+                                shape_updaters.append((i, ref_id, ref_tensor_idx, ref_shape_idx))
+                                break
+                        else:
+                            raise AssertionError()
+                    else:
+                        static_shape[i] = s
+
+                if len(static_shape) == 0:
+                    param_name = self.params[i].name if hasattr(self.params[i], "name") else f"parameter_{i}"
+                    raise ValueError(f"Cannot create output tensor (name={param_name}) - 0-dimensional tensors are not supported. ")
+
+                def gen_shape(inputs, tensor_list):
+                    shape = [i for i in static_shape]
+
+                    for i, ref_id, ref_tensor_idx, ref_shape_idx in shape_updaters:
+                        if ref_id == 2:
+                            shape[i] = inputs[ref_tensor_idx]
+                        elif ref_id == 0:
+                            shape[i] = tensor_list[ref_tensor_idx].shape[ref_shape_idx]
+                        elif ref_id == 1:
+                            shape[i] = tensor_list[ref_tensor_idx].stride()[ref_shape_idx]
+                    return shape
+
+                return gen_shape
+
+            instructions.append((2, i, meta_gen_shape(param_shapes[i]), param_dtypes[i]))
+
         def func(*inputs: torch.Tensor | Any):
-            # Validate input count strictly
-            expected_inputs = len(self.params) - len(self.result_idx)
             if len(inputs) != expected_inputs:
                 raise ValueError(f"Kernel expected {expected_inputs} inputs, but {len(inputs)} are provided.")
 
-            # Resolve the device used for outputs. Prefer the first tensor input's device
-            # if available, otherwise use PyTorch's current device.
-            out_device: torch.device | None = None
+            if len(self.params) == len(inputs):
+                # fast path, no conversion at all
+                tensor_list = inputs
+            else:
+                tensor_list: list[torch.Tensor] = [None] * len(self.params)
 
-            # Stitch the full positional argument list expected by the TVM executable
-            ins_idx: int = 0
-            tensor_list: list[torch.Tensor] = []
-
-            # Prepare input and output tensors
-            for i in range(len(self.params)):
-                if i in self.result_idx:
-                    dtype = param_dtypes[i]
-                    shape = []
-                    # Now working with native Python list, no FFI calls needed
-                    for s in param_shapes[i]:
-                        if isinstance(s, tir.Var):
-                            for key in dynamic_symbolic_map:
-                                if str(s) == str(key):
-                                    ref_id, ref_tensor_idx, ref_shape_idx = dynamic_symbolic_map[key]
-                                    if ref_id == 2:
-                                        shape.append(inputs[ref_tensor_idx])
-                                    elif ref_id == 0:
-                                        shape.append(tensor_list[ref_tensor_idx].shape[ref_shape_idx])
-                                    elif ref_id == 1:
-                                        shape.append(tensor_list[ref_tensor_idx].stride()[ref_shape_idx])
-                        else:  # Already converted to Python int during initialization
-                            shape.append(s)
+                # Resolve the device used for outputs. Prefer the first tensor input's device
+                # if available, otherwise use PyTorch's current device.
+                out_device: torch.device | None = None
+                # Prepare input and output tensors
+                for ins_id, i, *action in instructions:
+                    shapes = None
+                    if ins_id == 1:
+                        shapes, dtype = action
+                    elif ins_id == 2:
+                        get_shapes, dtype = action
+                        shapes = get_shapes(inputs, tensor_list)
 
                     if out_device is None:
                         out_device = current_device_functor()
-
-                    if len(shape) == 0:
-                        param_name = self.params[i].name if hasattr(self.params[i], "name") else f"parameter_{i}"
-                        raise ValueError(
-                            f"Cannot create output tensor (name={param_name}) - 0-dimensional tensors are not supported. "
-                            f"Expected shape: {shape}"
-                        )
-                    tensor = torch.empty(*shape, dtype=dtype, device=out_device)
-                else:
-                    tensor = inputs[ins_idx]
-                    ins_idx += 1
-                tensor_list.append(tensor)
+                    tensor_list[i] = torch.empty(shapes, dtype=dtype, device=out_device)
 
             executable(*tensor_list)
 
