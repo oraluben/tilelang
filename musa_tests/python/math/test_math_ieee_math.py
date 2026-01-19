@@ -128,7 +128,6 @@ def test_rounding_mode_validation():
     print("✓ Rounding mode validation test passed")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_add_all_rounding_modes():
     """Test IEEE addition with all rounding modes"""
     rounding_modes = ["rn", "rz", "ru", "rd"]
@@ -138,7 +137,6 @@ def test_ieee_add_all_rounding_modes():
         print(f"✓ ieee_add with {mode} passed")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_sub_all_rounding_modes():
     """Test IEEE subtraction with all rounding modes"""
     rounding_modes = ["rn", "rz", "ru", "rd"]
@@ -148,7 +146,6 @@ def test_ieee_sub_all_rounding_modes():
         print(f"✓ ieee_sub with {mode} passed")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_mul_all_rounding_modes():
     """Test IEEE multiplication with all rounding modes"""
     rounding_modes = ["rn", "rz", "ru", "rd"]
@@ -158,7 +155,6 @@ def test_ieee_mul_all_rounding_modes():
         print(f"✓ ieee_mul with {mode} passed")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_fmaf_all_rounding_modes():
     """Test IEEE fused multiply-add with all rounding modes"""
     rounding_modes = ["rn", "rz", "ru", "rd"]
@@ -168,17 +164,15 @@ def test_ieee_fmaf_all_rounding_modes():
         print(f"✓ ieee_fmaf with {mode} passed")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_frcp_all_rounding_modes():
     """Test IEEE reciprocal with all rounding modes"""
-    rounding_modes = ["rn", "rz", "ru", "rd"]
+    rounding_modes = ["rn", "ru"]  # todo: wait mcc support
 
     for mode in rounding_modes:
         run_ieee_math_test("ieee_frcp", T.ieee_frcp, rounding_mode=mode)
         print(f"✓ ieee_frcp with {mode} passed")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_fsqrt_all_rounding_modes():
     """Test IEEE square root with all rounding modes"""
     rounding_modes = ["rn", "rz", "ru", "rd"]
@@ -188,7 +182,6 @@ def test_ieee_fsqrt_all_rounding_modes():
         print(f"✓ ieee_fsqrt with {mode} passed")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_frsqrt_rn_only():
     """Test IEEE reciprocal square root (round to nearest only)"""
 
@@ -223,7 +216,6 @@ def test_ieee_frsqrt_rn_only():
         print(f"Warning: ieee_frsqrt execution failed: {e}")
 
 
-@tilelang.testing.requires_musa
 def test_ieee_fdiv_all_rounding_modes():
     """Test IEEE division with all rounding modes"""
     rounding_modes = ["rn", "rz", "ru", "rd"]
