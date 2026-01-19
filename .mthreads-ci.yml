@@ -16,7 +16,7 @@ variables:
   timeout: 60m
   variables:
     MUSA_PATH: "${MUSA_PATH:-/usr/local/musa/bin}"
-    K8S_IMAGE: "sh-harbor.mthreads.com/os-build/mt-build:developv2"   
+    K8S_IMAGE: "sh-harbor.mthreads.com/os-build/mt-build:develop"   
     GIT_SUBMODULE_STRATEGY: none
 
 # 构建 Release 版本
@@ -47,6 +47,9 @@ build-PH1:
     - "cd ${WORKSPACE}/${REPO_NAME}"
     - "export USE_MUSA=1"
     - "export PATH=/opt/_internal/cpython-3.10.19/bin:$PATH"
-    - "pip install -r requirements-dev.txt"
     - "python3 -m build --wheel -C cmake.define.USE_ALTERNATIVE_LINKER=OFF"
     - "cd dist && pip install *.whl"
+  artifacts:
+    - type: "oss"
+      paths:
+        - "${WORKSPACE}/${REPO_NAME}/dist/*.whl"
