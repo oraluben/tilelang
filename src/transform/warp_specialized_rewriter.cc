@@ -329,6 +329,28 @@ private:
   PrimExpr producer_barrier_idx_;
 };
 
+class ThreadVarReplacer : public StmtExprMutator {
+public:
+  static Stmt Rewrite(Stmt stmt, Var thread_var, PrimExpr replaced) {
+    ThreadVarReplacer rewriter(std::move(thread_var), std::move(replaced));
+    return rewriter(std::move(stmt));
+  }
+
+private:
+  ThreadVarReplacer(Var thread_var, PrimExpr replaced)
+      : thread_var_(std::move(thread_var)), replaced_(std::move(replaced)) {}
+
+  PrimExpr VisitExpr_(const VarNode *var) final {
+    if (var == thread_var_.get()) {
+      return replaced_;
+    }
+    return StmtExprMutator::VisitExpr_(var);
+  }
+
+  Var thread_var_;
+  PrimExpr replaced_;
+};
+
 class ThreadIdxRewriter : public StmtExprMutator {
 public:
   static Stmt Rewrite(Stmt stmt, Var thread_var, PrimExpr replaced,
@@ -393,6 +415,28 @@ private:
   bool maybe_thread_opt_ = false;
   bool do_shuffle_;
   bool has_tma_op_ = false;
+};
+
+class SimtCopyVirtualizer {
+public:
+  static Stmt Rewrite(Stmt stmt, Var thread_var, PrimExpr virtual_extent,
+                      PrimExpr physical_extent) {
+    auto uses_thread_var = [=](const tvm::tir::VarNode *parameter) {
+      return parameter == thread_var.get();
+    };
+    if (!UsesVar(stmt, uses_thread_var)) {
+      return stmt;
+    }
+
+    Var vthread("vthread", thread_var.dtype());
+    PrimExpr virtual_tid = thread_var + vthread * physical_extent;
+    Stmt replaced =
+        ThreadVarReplacer::Rewrite(std::move(stmt), thread_var, virtual_tid);
+    PrimExpr guard = LT(virtual_tid, virtual_extent);
+    Stmt guarded = IfThenElse(guard, replaced, std::nullopt);
+    PrimExpr loop_extent = ceildiv(virtual_extent, physical_extent);
+    return For(vthread, 0, loop_extent, ForKind::kSerial, guarded);
+  }
 };
 
 class ProducerBarrierGuarder : public StmtMutator {
@@ -620,11 +664,15 @@ public:
   WSCodeEmitter(bool is_emitting_producer, const IterVar &thread_iv,
                 Map<Var, Buffer> buffer_data_to_buffer,
                 const WarpSpecializedRoleMarker &marker,
-                bool mbarrier_only = false)
+                bool mbarrier_only = false,
+                Optional<PrimExpr> simt_virtual_extent = Optional<PrimExpr>(),
+                Optional<PrimExpr> simt_physical_extent = Optional<PrimExpr>())
       : is_emitting_producer_(is_emitting_producer),
         buffer_data_to_buffer_(std::move(buffer_data_to_buffer)),
         marker_(marker), thread_var_(thread_iv->var),
-        mbarrier_only_(mbarrier_only) {}
+        mbarrier_only_(mbarrier_only),
+        simt_virtual_extent_(std::move(simt_virtual_extent)),
+        simt_physical_extent_(std::move(simt_physical_extent)) {}
 
   /**
    * @brief Whether a SIMT-style bulk copy was detected.
@@ -638,6 +686,15 @@ public:
   bool hasSimtCopy() const { return has_simt_copy_; }
 
 private:
+  Stmt MaybeVirtualizeSimtCopy(Stmt stmt, bool has_simt_copy) {
+    if (!has_simt_copy || !simt_virtual_extent_.defined() ||
+        !simt_physical_extent_.defined()) {
+      return stmt;
+    }
+    return SimtCopyVirtualizer::Rewrite(std::move(stmt), thread_var_,
+                                        simt_virtual_extent_.value(),
+                                        simt_physical_extent_.value());
+  }
   template <
       typename NodeType> /**
                           * @brief Filter a statement by its producer/consumer
@@ -749,8 +806,10 @@ private:
           auto stmt =
               MbarrierRewriter::Rewrite(seq_transformed[i], release_barrier_id);
           collector.Collect(stmt);
+          bool has_simt_copy = collector.HasSimtCopy();
+          stmt = MaybeVirtualizeSimtCopy(std::move(stmt), has_simt_copy);
           block_stmt.push_back(stmt);
-          if (collector.HasSimtCopy()) {
+          if (has_simt_copy) {
             block_stmt.push_back(makeCpAsyncBarrier(release_barrier_id));
             has_simt_copy_ = true;
           }
@@ -1132,6 +1191,8 @@ private:
   std::vector<LoopInfo> loop_stack_;
   Var thread_var_;
   bool mbarrier_only_ = false;
+  Optional<PrimExpr> simt_virtual_extent_;
+  Optional<PrimExpr> simt_physical_extent_;
   PipelineInfo pipeline_info_;
   friend class WarpSpecializedRewriter;
   bool has_simt_copy_ = false;
@@ -1239,16 +1300,57 @@ private:
       block_realize.CopyOnWrite()->block = block;
       return block_realize;
     }
-    WSCodeEmitter producer(true, thread_iv_, buffer_data_to_buffer_, marker);
+    PrimExpr consumer_thread_extent = thread_iv_->dom->extent;
+    PrimExpr producer_thread_extent = thread_iv_->dom->extent;
+    // find producer_threads_override set by user
+    int64_t producer_threads_override = -1;
+    if (block->annotations.defined()) {
+      auto it =
+          block->annotations.find(attr::kWarpSpecializationProducerThreads);
+      if (it != block->annotations.end()) {
+        const auto &value = (*it).second;
+        producer_threads_override = value.cast<int64_t>();
+      }
+    }
+    // Need one warp-group for bulk-copy only case
+    if (!marker.HasSimtCopy())
+      producer_thread_extent = 128;
+    // check whether producer_threads_override is valid
+    bool use_override = false;
+    if (producer_threads_override > 0 && marker.HasSimtCopy()) {
+      int64_t consumer_threads = -1;
+      if (const auto *imm = consumer_thread_extent.as<IntImmNode>()) {
+        consumer_threads = imm->value;
+      }
+      ICHECK(consumer_threads > 0);
+      if (producer_threads_override > consumer_threads) {
+        LOG(WARNING) << "producer_threads(" << producer_threads_override
+                     << ") exceeds consumer threads(" << consumer_threads
+                     << "), ignoring override.";
+      } else if (producer_threads_override == consumer_threads) {
+        LOG(WARNING) << "producer_threads(" << producer_threads_override
+                     << ") equals consumer threads(" << consumer_threads
+                     << "), ignoring override.";
+      } else {
+        producer_thread_extent =
+            IntImm(consumer_thread_extent.dtype(), producer_threads_override);
+        use_override = true;
+      }
+    }
+
+    Optional<PrimExpr> simt_virtual_extent;
+    Optional<PrimExpr> simt_physical_extent;
+    if (use_override) {
+      simt_virtual_extent = consumer_thread_extent;
+      simt_physical_extent = producer_thread_extent;
+    }
+
+    WSCodeEmitter producer(true, thread_iv_, buffer_data_to_buffer_, marker,
+                           false, simt_virtual_extent, simt_physical_extent);
     WSCodeEmitter consumer(false, thread_iv_, buffer_data_to_buffer_, marker,
                            false);
     Stmt producer_code = producer(block->body);
     Stmt consumer_code = consumer(block->body);
-    PrimExpr consumer_thread_extent = thread_iv_->dom->extent;
-    PrimExpr producer_thread_extent = thread_iv_->dom->extent;
-    // Need one warp-group for bulk-copy only case
-    if (!marker.HasSimtCopy())
-      producer_thread_extent = 128;
 
     // Guard for producer barrier
     bool guard_producer_barrier =

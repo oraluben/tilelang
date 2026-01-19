@@ -231,6 +231,7 @@ def Kernel(
     threads: int | list[int] | tuple | None = None,
     is_cpu: bool = False,
     prelude: str | None = None,
+    producer_threads: int | None = None,
 ):
     """Tools to quickly construct a GPU kernel launch frame.
 
@@ -249,6 +250,8 @@ def Kernel(
     prelude : str
         The import c code of the kernel,
         will be injected before the generated kernel code.
+    producer_threads : int | None
+        Optional producer thread count for warp-specialized kernels.
 
     Returns
     -------
@@ -299,6 +302,12 @@ def Kernel(
 
     if prelude is not None:
         attrs["pragma_import_c"] = prelude
+    if producer_threads is not None:
+        if is_cpu:
+            raise ValueError("producer_threads is only valid for GPU kernels")
+        if not isinstance(producer_threads, int):
+            raise TypeError("producer_threads must be an int")
+        attrs["tl.warp_specialization_producer_threads"] = producer_threads
 
     return _ffi_api.KernelLaunch(blocks, threads, attrs)
 
