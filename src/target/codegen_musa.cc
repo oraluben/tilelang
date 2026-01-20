@@ -673,6 +673,21 @@ void CodeGenTileLangMUSA::PrintType(DataType t, std::ostream &os) { // NOLINT(*)
   LOG(FATAL) << "Cannot convert type " << t << " to MUSA type";
 }
 
+void CodeGenTileLangMUSA::PrintVecConstructor(DataType t,
+                                              std::ostream &os) { // NOLINT(*)
+  if (t.is_float() && t.bits() == 32) {
+    if (t.lanes() == 2) {
+      os << "make_float2";
+      return;
+    }
+    if (t.lanes() == 4) {
+      os << "make_float4";
+      return;
+    }
+  }
+  CodeGenC::PrintVecConstructor(t, os);
+}
+
 void CodeGenTileLangMUSA::PrintVecBinaryOp(const std::string &op, DataType t,
                                            PrimExpr lhs, PrimExpr rhs,
                                            std::ostream &os) { // NOLINT(*)
@@ -687,22 +702,28 @@ void CodeGenTileLangMUSA::PrintVecBinaryOp(const std::string &op, DataType t,
     std::string vlhs = SSAGetID(PrintExpr(lhs), lhs.dtype());
     std::string vrhs = SSAGetID(PrintExpr(rhs), rhs.dtype());
 
-    for (int i = 0, lanes = t.lanes(); i < lanes; ++i) {
-      std::ostringstream value_temp;
-      if (isalpha(op[0])) {
-        value_temp << op << "(";
-        PrintVecElemLoad(vlhs, lhs.dtype(), i, value_temp);
-        value_temp << ", ";
-        PrintVecElemLoad(vrhs, rhs.dtype(), i, value_temp);
-        value_temp << ")";
-      } else {
-        value_temp << "(";
-        PrintVecElemLoad(vlhs, lhs.dtype(), i, value_temp);
-        value_temp << op;
-        PrintVecElemLoad(vrhs, rhs.dtype(), i, value_temp);
-        value_temp << ")";
+    if (op == "max" && t.is_float() && t.bits() == 32 &&
+        (t.lanes() == 2 || t.lanes() == 4)) {
+      this->PrintIndent();
+      stream << "mute::max(" << sret << ", " << vlhs << ", " << vrhs << ");\n";
+    } else {
+      for (int i = 0, lanes = t.lanes(); i < lanes; ++i) {
+        std::ostringstream value_temp;
+        if (isalpha(op[0])) {
+          value_temp << op << "(";
+          PrintVecElemLoad(vlhs, lhs.dtype(), i, value_temp);
+          value_temp << ", ";
+          PrintVecElemLoad(vrhs, rhs.dtype(), i, value_temp);
+          value_temp << ")";
+        } else {
+          value_temp << "(";
+          PrintVecElemLoad(vlhs, lhs.dtype(), i, value_temp);
+          value_temp << op;
+          PrintVecElemLoad(vrhs, rhs.dtype(), i, value_temp);
+          value_temp << ")";
+        }
+        PrintVecElemStore(sret, t, i, value_temp.str());
       }
-      PrintVecElemStore(sret, t, i, value_temp.str());
     }
   }
   EndScope(ssa_scope);

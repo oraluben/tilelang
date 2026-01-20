@@ -5,6 +5,8 @@
 
 #include "reduce.h"
 
+#include <tvm/arith/pattern.h>
+#include <tvm/tir/analysis.h>
 #include <tvm/tir/builtin.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/op_attr_types.h>
@@ -20,6 +22,68 @@ namespace tvm {
 namespace tl {
 
 using namespace tir;
+
+namespace {
+
+struct MusaSimdMaxPlan {
+  bool enabled{false};
+  Var rv;
+  PrimExpr base;
+  int64_t groups{0};
+};
+
+MusaSimdMaxPlan PlanMusaSimdMax(const Target &target,
+                                const ReduceType &reduce_type,
+                                const Buffer &src_buffer,
+                                const Buffer &dst_buffer,
+                                const Array<PrimExpr> &src_indice_compressed,
+                                const Array<IterVar> &src_var_compressed) {
+  MusaSimdMaxPlan plan;
+  if (!TargetIsMusa(target) || !reduce_type->isMax()) {
+    return plan;
+  }
+  if (!src_buffer->dtype.is_float() || src_buffer->dtype.bits() != 32 ||
+      !src_buffer->dtype.is_scalar()) {
+    return plan;
+  }
+  if (!dst_buffer->dtype.is_float() || dst_buffer->dtype.bits() != 32 ||
+      !dst_buffer->dtype.is_scalar()) {
+    return plan;
+  }
+  if (src_indice_compressed.size() != 1 || src_var_compressed.size() != 1) {
+    return plan;
+  }
+
+  Var rv = src_var_compressed[0]->var;
+  auto uses_var = [](const PrimExpr &expr, const Var &var) {
+    return UsesVar(expr, [&](const VarNode *v) { return v == var.get(); });
+  };
+  if (!uses_var(src_indice_compressed[0], rv)) {
+    return plan;
+  }
+
+  auto coeffs = arith::DetectLinearEquation(src_indice_compressed[0], {rv});
+  if (coeffs.size() != 2) {
+    return plan;
+  }
+  auto coeff = as_const_int(coeffs[0]);
+  if (coeff == nullptr || *coeff != 1 || uses_var(coeffs[1], rv)) {
+    return plan;
+  }
+
+  auto extent = as_const_int(src_var_compressed[0]->dom->extent);
+  if (extent == nullptr || *extent < 8 || (*extent % 8) != 0) {
+    return plan;
+  }
+
+  plan.enabled = true;
+  plan.rv = rv;
+  plan.base = coeffs[1];
+  plan.groups = *extent / 8;
+  return plan;
+}
+
+} // namespace
 
 ReduceOp::ReduceOp(Array<PrimExpr> args, BufferMap vmap) {
   ObjectPtr<ReduceOpNode> node = tvm::ffi::make_object<ReduceOpNode>();
@@ -266,17 +330,58 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
       src_var_compressed.push_back(var);
     }
 
-    Stmt reduce_local = BufferStore(
-        clear_buffer,
-        this->MakeReduce(BufferLoad(clear_buffer, dst_indices),
-                         BufferLoad(src_buffer, src_indice_compressed)),
-        dst_indices);
+    // Use MUSA SIMD max when reduction is contiguous float32 with extent % 8.
+    MusaSimdMaxPlan simd_plan =
+        PlanMusaSimdMax(T.target, this->type, src_buffer, dst_buffer,
+                        src_indice_compressed, src_var_compressed);
 
-    for (int i = static_cast<int>(src_layout->OutputDim()) - 1; i >= 0; --i) {
+    Stmt reduce_local;
+    if (simd_plan.enabled) {
+      Var rv_outer(simd_plan.rv->name_hint + "_vec", simd_plan.rv->dtype);
+      PrimExpr rv_scale = make_const(rv_outer.dtype(), 8);
+      PrimExpr idx_base =
+          analyzer->Simplify(simd_plan.base + rv_outer * rv_scale);
+
+      Var vec4_var("vec4", DataType::Float(32, 4));
+      Var vec2_var("vec2", DataType::Float(32, 2));
+      PrimExpr vec0 = BufferLoad(
+          src_buffer, {Ramp(idx_base, make_const(idx_base.dtype(), 1), 4)});
+      PrimExpr vec1 = BufferLoad(
+          src_buffer,
+          {Ramp(analyzer->Simplify(idx_base + make_const(idx_base.dtype(), 4)),
+                make_const(idx_base.dtype(), 1), 4)});
+
+      PrimExpr vec4_expr = Max(vec0, vec1);
+      PrimExpr vec2_0 = Shuffle({vec4_var}, {make_const(DataType::Int(32), 0),
+                                             make_const(DataType::Int(32), 1)});
+      PrimExpr vec2_1 = Shuffle({vec4_var}, {make_const(DataType::Int(32), 2),
+                                             make_const(DataType::Int(32), 3)});
+      PrimExpr vec2_expr = Max(vec2_0, vec2_1);
+      PrimExpr s0 = Shuffle({vec2_var}, {make_const(DataType::Int(32), 0)});
+      PrimExpr s1 = Shuffle({vec2_var}, {make_const(DataType::Int(32), 1)});
+      PrimExpr group_max =
+          Let(vec4_var, vec4_expr, Let(vec2_var, vec2_expr, Max(s0, s1)));
+
+      reduce_local = BufferStore(
+          clear_buffer,
+          this->MakeReduce(BufferLoad(clear_buffer, dst_indices), group_max),
+          dst_indices);
       reduce_local =
-          For(src_var_compressed[i]->var, 0, src_var_compressed[i]->dom->extent,
+          For(rv_outer, 0, make_const(rv_outer.dtype(), simd_plan.groups),
               ForKind::kUnrolled, reduce_local, std::nullopt,
               {{tir::attr::pragma_unroll_explicit, Bool(false)}});
+    } else {
+      reduce_local = BufferStore(
+          clear_buffer,
+          this->MakeReduce(BufferLoad(clear_buffer, dst_indices),
+                           BufferLoad(src_buffer, src_indice_compressed)),
+          dst_indices);
+      for (int i = static_cast<int>(src_layout->OutputDim()) - 1; i >= 0; --i) {
+        reduce_local = For(src_var_compressed[i]->var, 0,
+                           src_var_compressed[i]->dom->extent,
+                           ForKind::kUnrolled, reduce_local, std::nullopt,
+                           {{tir::attr::pragma_unroll_explicit, Bool(false)}});
+      }
     }
     stmts.push_back(reduce_local);
 

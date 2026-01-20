@@ -12,9 +12,9 @@
 #include <string>
 #include <unordered_map>
 
+#include "musa.h"
 #include "target/source/codegen_c.h"
 #include "tvm/ffi/string.h"
-#include "musa.h"
 
 namespace tvm {
 namespace codegen {
@@ -29,7 +29,8 @@ public:
   void VisitStmt_(const ForNode *op) final;
   void PrintStorageSync(const CallNode *op) final;
   void PrintStorageScope(const std::string &scope,
-                         std::ostream &os) final; // NOLINT(*)
+                         std::ostream &os) final;               // NOLINT(*)
+  void PrintVecConstructor(DataType t, std::ostream &os) final; // NOLINT(*)
   void PrintVecBinaryOp(const std::string &op, DataType t, PrimExpr lhs,
                         PrimExpr rhs,
                         std::ostream &os) final;      // NOLINT(*)
