@@ -4,6 +4,7 @@
 #include <musa_bf16.h>
 #include <musa_fp16.h>
 #include <musa_runtime.h>
+#include <mute/arch/simd_mp31.hpp>
 #include <mutlass/fast_math.h>
 #include <mutlass/numeric_types.h>
 #include <sstream> // std::stringstream
