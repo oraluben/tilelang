@@ -188,9 +188,7 @@ class LibraryGenerator:
         ]
 
         if self.compile_flags:
-            command += [
-                item for flag in self.compile_flags for item in flag.split() if item not in command
-            ]
+            command += [item for flag in self.compile_flags for item in flag.split()]
 
         command += ["-o", libpath]
 
