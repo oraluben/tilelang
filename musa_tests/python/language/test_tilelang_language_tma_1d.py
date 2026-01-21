@@ -1,6 +1,7 @@
 import torch
 import tilelang
 import tilelang.language as T
+import re
 
 
 def ref_program(x, y):
@@ -42,10 +43,13 @@ def run_elementwise_add(M, N):
     torch.testing.assert_close(out, ref_program(a, b), rtol=1e-2, atol=1e-2)
 
     code = kernel.get_kernel_source()
+    tma_load_pattern_2d = r'tl::tma_load.*128.*128'
+    tma_load_pattern_1d = r'tl::tma_load.*16384'
+
     if block_N == N:
-        assert "tma_load" in code and "CUtensorMap" not in code
+        assert "tma_load" in code and re.search(tma_load_pattern_1d, code)
     else:
-        assert "tma_load" in code and "CUtensorMap" in code
+        assert "tma_load" in code and re.search(tma_load_pattern_2d, code)
 
 
 def main():
