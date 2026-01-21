@@ -303,8 +303,6 @@ def run_gemm_sp_sm80(
     )
 
 
-@tilelang.testing.requires_musa
-# @tilelang.testing.requires_musa_compute_version(9, 0)
 def test_gemm_sp_sm90():
     run_gemm_sp_sm90(512, 1024, 768, "float16", "float32", "float32", 64, 64, 32, 2, 128)
     run_gemm_sp_sm90(512, 1024, 768, "float16", "float32", "float32", 64, 64, 32, 0, 256)
@@ -330,9 +328,6 @@ def test_gemm_sp_sm90():
     run_gemm_sp_sm90(512, 1024, 768, "int8", "int32", "int32", 64, 64, 64, 2, 128, False, True)
 
 
-@tilelang.testing.requires_musa
-# @tilelang.testing.requires_musa_compute_version_ge(8, 0)
-# @tilelang.testing.requires_musa_compute_version_le(8, 9)
 def test_gemm_sp_sm80():
     run_gemm_sp_sm80(512, 1024, 768, "float16", "float32", "float32", 32, 32, 32, 0, 32)
     run_gemm_sp_sm80(512, 1024, 768, "float16", "float32", "float32", 64, 64, 64, 0, 32)

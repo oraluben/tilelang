@@ -146,6 +146,7 @@ exclude = [
 # See https://github.com/tile-ai/tilelang/issues/1079 for more information.
 "testing/**.py" = ["UP", "FA"]
 "examples/**.py" = ["UP", "FA"]
+"musa_tests/**.py" = ["UP", "FA"]
 
 [tool.ruff.lint]
 select = [

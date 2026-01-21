@@ -213,8 +213,6 @@ def assert_tl_matmul_correctness(M, N, K, in_dtype, out_dtype, accum_dtype):
     tilelang.testing.torch_assert_close(C, ref_c, rtol=1e-2, atol=1e-2)
 
 
-@tilelang.testing.requires_musa
-# @tilelang.testing.requires_musa_compute_version(8, 0)
 def test_assert_tl_matmul_bfloat16():
     assert_tl_matmul_correctness(256, 256, 256, "bfloat16", "float32", "float32")
 

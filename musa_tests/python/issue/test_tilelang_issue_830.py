@@ -34,7 +34,6 @@ def _empty_with_dead_code_kernel():
     return buggy_kernel
 
 
-@tilelang.testing.requires_musa
 def test_empty_with_dead_code_kernel():
     kernel = _empty_with_dead_code_kernel()
     x = torch.randn((128,), dtype=torch.float32, device="musa")

@@ -22,7 +22,6 @@ def run_passes(func: tvm.tir.PrimFunc):
     return tilelang.transform.ThreadSync("shared")(mod)
 
 
-@tilelang.testing.requires_musa
 def test_sync_if_with_same_index():
 
     @T.prim_func(check_well_formed=False)
@@ -45,7 +44,6 @@ def test_sync_if_with_same_index():
     assert "T.tvm_storage_sync" in str(mod)
 
 
-@tilelang.testing.requires_musa
 def test_sync_read_thread_id_independent_location():
 
     @T.prim_func
@@ -69,7 +67,6 @@ def test_sync_read_thread_id_independent_location():
     assert "T.tvm_storage_sync" in str(mod)
 
 
-@tilelang.testing.requires_musa
 def test_sync_shared():
 
     @T.prim_func(private=True)
@@ -188,7 +185,6 @@ def test_sync_let_stmt():
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
 
-@tilelang.testing.requires_musa
 def test_sync_shared_dyn_stmatrix_loop_hoist():
 
     @T.prim_func

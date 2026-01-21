@@ -47,7 +47,6 @@ def run_ceildiv_dyn(a=128, b=32):
     print(A)
 
 
-@tilelang.testing.requires_musa
 def test_ceildiv_dyn():
     run_ceildiv_dyn(a=128, b=32)
     run_ceildiv_dyn(a=1, b=32)

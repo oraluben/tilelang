@@ -83,7 +83,7 @@ def run_single_bitwise_reduce(
     elif name == "reduce_bitor" or name == "reduce_bitxor":
         expected = torch.full((M,), 0, device="musa", dtype=torch.int32)
     else:
-        raise ValueError("Invalid name: {}".format(name))
+        raise ValueError(f"Invalid name: {name}")
 
     output = kernel(a, expected)
 
@@ -96,12 +96,11 @@ def run_single_bitwise_reduce(
             elif name == "reduce_bitxor":
                 expected[i] = expected[i] ^ a[i, j]
             else:
-                raise ValueError("Invalid name: {}".format(name))
+                raise ValueError(f"Invalid name: {name}")
     assert torch.all(output == expected)
-    print("✓ {} with clear={} test passed".format(name, clear))
+    print(f"✓ {name} with clear={clear} test passed")
 
 
-@tilelang.testing.requires_musa
 def test_bitwise_reduce_ops():
     run_single_bitwise_reduce("reduce_bitand", T.reduce_bitand, clear=True)
     run_single_bitwise_reduce("reduce_bitor", T.reduce_bitor, clear=True)

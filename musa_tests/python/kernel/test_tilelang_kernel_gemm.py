@@ -95,8 +95,8 @@ def run_gemm(
         if in_dtype == "float32":
             # Convert float32 to tfloat32 because tfloat32 mma cannot truncate
             # float32 automatically, -0x1000 meas
-            A = ((A.view(torch.int32) - 0x1000)).view(torch.float32)
-            B = ((B.view(torch.int32) - 0x1000)).view(torch.float32)
+            A = (A.view(torch.int32) - 0x1000).view(torch.float32)
+            B = (B.view(torch.int32) - 0x1000).view(torch.float32)
         C = torch.matmul(A.to(torch.float), B.to(torch.float))
         C = C.to(torch.__getattribute__(out_dtype))
         return C
@@ -399,7 +399,8 @@ def run_gemm_sr(
 
 
 # WGMMA only supports B in shared
-# @tilelang.testing.requires_musa_compute_version_le(8, 9)
+
+
 def test_gemm_f16f16f16_sr():
     run_gemm_sr(
         512,
@@ -518,7 +519,8 @@ def run_gemm_rs(
 
 
 # Register source A operand GMMAs must have K-major A layout.
-# @tilelang.testing.requires_musa_compute_version_le(8, 9)
+
+
 def test_gemm_f16f16f16_rs():
     run_gemm_rs(
         512,
