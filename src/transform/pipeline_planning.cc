@@ -7,6 +7,7 @@
 #include <tvm/tir/transform.h>
 
 #include "../op/builtin.h"
+#include "common/collector.h"
 #include <unordered_map>
 #include <utility>
 
@@ -381,6 +382,20 @@ private:
         }
       }
 
+      if (ws_tma_enabled && HasForceAsyncCopyAttr(loop->body) &&
+          TargetHasAsyncCopy(target_) && use_async_copy_) {
+        Map<String, Any> annotations;
+        for (const auto &[key, value] : loop->annotations) {
+          if (key != "tl_pipeline_order" && key != "tl_pipeline_stage") {
+            annotations.Set(key, value);
+          }
+        }
+        annotations.Set(tir::attr::software_pipeline_async_stages,
+                        Array<Integer>{0});
+        auto for_node = tvm::ffi::GetRef<For>(loop);
+        for_node.CopyOnWrite()->annotations = annotations;
+        return for_node;
+      }
       if (ws_tma_enabled) {
         return StmtExprMutator::VisitStmt_(loop);
       }

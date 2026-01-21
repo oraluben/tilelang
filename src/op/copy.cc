@@ -224,6 +224,9 @@ Copy::Copy(Array<PrimExpr> args, BufferMap vmap) {
   if (args.size() >= 5) {
     node->eviction_policy = args[4].as<IntImmNode>()->value;
   }
+  if (args.size() >= 6) {
+    node->force_async_copy = Downcast<Bool>(args[5]);
+  }
   data_ = std::move(node);
 }
 
@@ -937,11 +940,15 @@ Stmt CopyNode::LowerNormalCopy(const LowerArgs &T,
     vectorized_thread_loop = VectorizeLoop(thread_loop);
   }
 
+  Stmt body = vectorized_thread_loop;
   if (par_op->GetPredicate(T.thread_var).defined()) {
-    return IfThenElse(par_op->GetPredicate(T.thread_var).value(),
-                      vectorized_thread_loop);
+    body = IfThenElse(par_op->GetPredicate(T.thread_var).value(), body);
   }
-  return vectorized_thread_loop;
+  if (force_async_copy) {
+    body = AttrStmt(make_zero(DataType::Int(32)), attr::kForceAsyncCopy, 1,
+                    body);
+  }
+  return body;
 }
 
 /**

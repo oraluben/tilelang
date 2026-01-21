@@ -30,6 +30,7 @@ static constexpr const char *kCustomWarpSpecialization =
 static constexpr const char *kWarpSpecializationProducerThreads =
     "tl.warp_specialization_producer_threads";
 static constexpr const char *kLocalVarInit = "tl.local_var_init";
+static constexpr const char *kForceAsyncCopy = "tl.force_async_copy";
 } // namespace attr
 
 static constexpr const char *kDebugMergeSharedMemoryAllocations =
