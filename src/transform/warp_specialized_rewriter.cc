@@ -4,6 +4,7 @@
  */
 
 #include "warp_specialized_rewriter.h"
+#include "common/collector.h"
 #include <tvm/target/target.h>
 
 namespace tvm {
@@ -805,13 +806,23 @@ private:
               stage_ + num_barriers_ + num_stages_ * pattern_idx;
           auto stmt =
               MbarrierRewriter::Rewrite(seq_transformed[i], release_barrier_id);
+          bool force_async_copy = HasForceAsyncCopyAttr(stmt);
           collector.Collect(stmt);
           bool has_simt_copy = collector.HasSimtCopy();
           stmt = MaybeVirtualizeSimtCopy(std::move(stmt), has_simt_copy);
+          if (has_simt_copy && force_async_copy) {
+            stmt = AttrStmt(make_zero(DataType::Int(32)),
+                            tir::attr::async_scope, 1, std::move(stmt));
+          }
           block_stmt.push_back(stmt);
           if (has_simt_copy) {
             block_stmt.push_back(makeCpAsyncBarrier(release_barrier_id));
             has_simt_copy_ = true;
+            if (force_async_copy) {
+              auto wait_cnt = IntImm(DataType::Int(32), 0);
+              block_stmt.push_back(Evaluate(Call(
+                  DataType::Void(), builtin::ptx_wait_group(), {wait_cnt})));
+            }
           }
           if (map.release_after[i][j]) {
             block_stmt.push_back(makeArriveBarrier(release_barrier_id));

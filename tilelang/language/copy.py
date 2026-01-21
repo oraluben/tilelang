@@ -12,6 +12,7 @@ def copy(src: tir.Buffer | tir.BufferLoad | tir.BufferRegion,
          dst: tir.Buffer | tir.BufferLoad,
          coalesced_width: int | None = None,
          disable_tma: bool = False,
+         force_async_copy: bool = False,
          eviction_policy: Literal["evict_normal", "evict_first", "evict_last"] | None = None):
     """Copy data between memory regions.
 
@@ -84,7 +85,7 @@ def copy(src: tir.Buffer | tir.BufferLoad | tir.BufferRegion,
     else:
         eviction_policy = {"evict_normal": 0, "evict_first": 1, "evict_last": 2}[eviction_policy]
     return tir.call_intrin("handle", tir.op.Op.get("tl.copy"), src, dst, coalesced_width,
-                           disable_tma, eviction_policy)
+                           disable_tma, eviction_policy, force_async_copy)
 
 
 def c2d_im2col(img: tir.Buffer,
