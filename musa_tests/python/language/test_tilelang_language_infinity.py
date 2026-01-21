@@ -21,7 +21,6 @@ def _test_infinity(dtype: str):
     assert torch.all(output == torch.inf), f'check failed for {dtype=}'
 
 
-@tilelang.testing.requires_musa
 def test_infinity():
     _test_infinity("float16")
     _test_infinity("bfloat16")

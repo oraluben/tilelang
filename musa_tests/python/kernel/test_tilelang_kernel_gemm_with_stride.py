@@ -76,8 +76,6 @@ def run_gemm_with_stride_ss(M: int, N: int, K: int, block_M: int, block_N: int, 
     print("Kernel output matches PyTorch reference.")
 
 
-@tilelang.testing.requires_musa
-# @tilelang.testing.requires_musa_compute_version_ge(7, 5)
 def test_tilelang_kernel_gemm_with_stride():
     run_gemm_with_stride_ss(128, 128, 64, 32, 32, 32)
 

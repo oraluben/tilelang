@@ -259,7 +259,6 @@ def run_fastmath_mathop_test(mathop_name,
     print(f"✓ {mathop_name} numerical test passed")
 
 
-@tilelang.testing.requires_musa
 def test_mathops_generate_no_fastmath():
     """Test that our tl.* mathops generate fastmath MUSA code (__expf etc.)"""
     # Based on test results, our tl.* intrinsics actually generate
@@ -294,7 +293,6 @@ def test_mathops_generate_no_fastmath():
         print(f"✓ {name} test passed")
 
 
-@tilelang.testing.requires_musa
 def test_two_arg_mathops_fastmath():
     """Test all two-argument mathops"""
     # Two argument mathops
@@ -307,13 +305,11 @@ def test_two_arg_mathops_fastmath():
         run_two_arg_mathop_test(name, func, dtype="float32")
 
 
-@tilelang.testing.requires_musa
 def test_abs_maps_to_fabs():
     """Test that abs correctly maps to fabs"""
     run_abs_test()
 
 
-@tilelang.testing.requires_musa
 def test_fastmath_versions():
     """Test that __exp, __exp10, __log, __log2, __log10, __tan, __cos, __sin generate fastmath MUSA code"""
     # Test fastmath versions

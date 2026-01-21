@@ -37,7 +37,6 @@ def run_chain_equal(N=128, block_size=64, dtype="float32"):
     torch.testing.assert_close(C, ref)
 
 
-@tilelang.testing.requires_musa
 def test_chain_equal():
     run_chain_equal()
 
