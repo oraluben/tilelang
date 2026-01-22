@@ -15,7 +15,7 @@ from tilelang.transform import PassConfigKey
 from tilelang.contrib.nvcc import get_nvcc_compiler, get_target_arch, get_target_compute_version
 from tilelang.contrib.mcc import get_mcc_compiler, get_musa_arch, get_musa_compute_version
 from tilelang.contrib.rocm import find_rocm_path, get_rocm_arch
-from tilelang.env import TILELANG_TEMPLATE_PATH
+from tilelang.env import TILELANG_TEMPLATE_PATH, env
 from tilelang.utils.deprecated import deprecated_warning
 
 from .utils import is_cpu_target, is_cuda_target, is_hip_target, is_musa_target
@@ -192,7 +192,21 @@ class LibraryGenerator:
 
         command += ["-o", libpath]
 
-        src.write(self.lib_code)
+        # Check if custom source file is specified via environment variable
+        lib_code_to_write = self.lib_code
+        custom_source = env.TILELANG_REPLACE_MUSAC
+        if custom_source and os.path.isfile(custom_source):
+            try:
+                with open(custom_source, encoding='utf-8') as f:
+                    lib_code_to_write = f.read()
+                if verbose:
+                    logger.info(f"Replacing Musa C with: {custom_source}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to read replaced file {custom_source}: {e}, using generated code")
+                raise
+
+        src.write(lib_code_to_write)
         src.flush()
 
         try:

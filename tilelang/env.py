@@ -258,6 +258,8 @@ class Environment:
     TILELANG_PRINT_ON_COMPILATION = EnvVar("TILELANG_PRINT_ON_COMPILATION",
                                            "1")  # print kernel name on compile
     TILELANG_CLEAR_CACHE = EnvVar("TILELANG_CLEAR_CACHE", "0")  # clear cache automatically if set
+    TILELANG_REPLACE_MUSAC = EnvVar("TILELANG_REPLACE_MUSAC",
+                                    "")  # custom source file path to replace generated code
 
     # Auto-tuning settings
     TILELANG_AUTO_TUNING_CPU_UTILITIES = EnvVar("TILELANG_AUTO_TUNING_CPU_UTILITIES",
