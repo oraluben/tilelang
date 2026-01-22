@@ -1279,6 +1279,25 @@ void CodeGenTileLangMUSA::PrintCallExtern(Type ret_type, String global_symbol,
                                           std::ostream &os) { // NOLINT(*)
   DataType ret_dtype = GetRuntimeDataType(ret_type);
   if (ret_dtype.is_fixed_length_vector()) {
+    if (global_symbol == "tl::vec_max_f2" ||
+        global_symbol == "tl::vec_max_f4" ||
+        global_symbol == "tl::shfl_xor_sync") {
+      std::vector<std::string> sargs;
+      size_t arg_begin = static_cast<size_t>(skip_first_arg);
+      for (size_t i = arg_begin; i < args.size(); ++i) {
+        std::string val = SSAGetID(PrintExpr(args[i]), args[i].dtype());
+        sargs.push_back(std::move(val));
+      }
+      os << global_symbol << "(";
+      for (size_t i = 0; i < sargs.size(); ++i) {
+        if (i != 0) {
+          os << ", ";
+        }
+        os << sargs[i];
+      }
+      os << ")";
+      return;
+    }
     //
     // Emit an unsupported vector call
     //

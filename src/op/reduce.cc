@@ -25,29 +25,48 @@ using namespace tir;
 
 namespace {
 
-struct MusaSimdMaxPlan {
+const DataType kFloat32x4 = DataType::Float(32, 4);
+const DataType kFloat32x2 = DataType::Float(32, 2);
+const DataType kInt32 = DataType::Int(32);
+const DataType kUInt32 = DataType::UInt(32);
+
+struct MusaInThreadSimdPlan {
   bool enabled{false};
   Var rv;
   PrimExpr base;
   int64_t groups{0};
 };
 
-MusaSimdMaxPlan PlanMusaSimdMax(const Target &target,
-                                const ReduceType &reduce_type,
-                                const Buffer &src_buffer,
-                                const Buffer &dst_buffer,
-                                const Array<PrimExpr> &src_indice_compressed,
-                                const Array<IterVar> &src_var_compressed) {
-  MusaSimdMaxPlan plan;
+struct MusaInterThreadSimdPlan {
+  bool enabled{false};
+  Var dst_var;
+  PrimExpr base;
+  int64_t groups{0};
+};
+
+bool CheckMusaSimdCommon(const Target &target, const ReduceType &reduce_type,
+                         const Buffer &src_buffer, const Buffer &dst_buffer) {
   if (!TargetIsMusa(target) || !reduce_type->isMax()) {
-    return plan;
+    return false;
   }
   if (!src_buffer->dtype.is_float() || src_buffer->dtype.bits() != 32 ||
       !src_buffer->dtype.is_scalar()) {
-    return plan;
+    return false;
   }
   if (!dst_buffer->dtype.is_float() || dst_buffer->dtype.bits() != 32 ||
       !dst_buffer->dtype.is_scalar()) {
+    return false;
+  }
+  return true;
+}
+
+MusaInThreadSimdPlan
+PlanMusaInThreadSimd(const Target &target, const ReduceType &reduce_type,
+                     const Buffer &src_buffer, const Buffer &dst_buffer,
+                     const Array<PrimExpr> &src_indice_compressed,
+                     const Array<IterVar> &src_var_compressed) {
+  MusaInThreadSimdPlan plan;
+  if (!CheckMusaSimdCommon(target, reduce_type, src_buffer, dst_buffer)) {
     return plan;
   }
   if (src_indice_compressed.size() != 1 || src_var_compressed.size() != 1) {
@@ -80,6 +99,54 @@ MusaSimdMaxPlan PlanMusaSimdMax(const Target &target,
   plan.rv = rv;
   plan.base = coeffs[1];
   plan.groups = *extent / 8;
+  return plan;
+}
+
+MusaInterThreadSimdPlan
+PlanMusaInterThreadSimd(const Target &target, const ReduceType &reduce_type,
+                        const Buffer &src_buffer, const Buffer &dst_buffer,
+                        const Array<PrimExpr> &dst_indices,
+                        const Array<IterVar> &dst_vars,
+                        const Fragment &dst_layout) {
+  MusaInterThreadSimdPlan plan;
+  if (!CheckMusaSimdCommon(target, reduce_type, src_buffer, dst_buffer)) {
+    return plan;
+  }
+  if (dst_indices.size() != 1 || dst_vars.size() != 1) {
+    return plan;
+  }
+
+  Var dv = dst_vars[0]->var;
+  auto uses_var = [](const PrimExpr &expr, const Var &var) {
+    return UsesVar(expr, [&](const VarNode *v) { return v == var.get(); });
+  };
+  auto input_extent = as_const_int(dst_vars[0]->dom->extent);
+  if (input_extent == nullptr) {
+    return plan;
+  }
+  Array<PrimExpr> out_shape = dst_layout->OutputShape();
+  if (out_shape.size() != 1) {
+    return plan;
+  }
+  auto out_extent = as_const_int(out_shape[0]);
+  if (out_extent == nullptr || *out_extent < 4 || (*out_extent % 4) != 0) {
+    return plan;
+  }
+  arith::Analyzer local_analyzer;
+  local_analyzer.Bind(
+      dv, Range::FromMinExtent(make_zero(dv.dtype()),
+                               make_const(dv.dtype(), *input_extent)));
+  auto dst_set = local_analyzer.int_set(dst_indices[0]);
+  auto dst_min = as_const_int(dst_set.min());
+  auto dst_max = as_const_int(dst_set.max());
+  if (!(dst_min && dst_max && *dst_min == 0 && *dst_max == (*out_extent - 1))) {
+    return plan;
+  }
+
+  plan.enabled = true;
+  plan.dst_var = dv;
+  plan.base = make_zero(dv.dtype());
+  plan.groups = *out_extent / 4;
   return plan;
 }
 
@@ -287,6 +354,7 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
         dst_vars.Map([](const auto &iv) { return PrimExpr(iv->var); }));
 
     Array<Stmt> stmts;
+    Array<Stmt> stmts_after_loop;
 
     bool require_init = this->clear;
     if (this->type->isSum() || this->type->isAbsSum() ||
@@ -331,9 +399,9 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     }
 
     // Use MUSA SIMD max when reduction is contiguous float32 with extent % 8.
-    MusaSimdMaxPlan simd_plan =
-        PlanMusaSimdMax(T.target, this->type, src_buffer, dst_buffer,
-                        src_indice_compressed, src_var_compressed);
+    MusaInThreadSimdPlan simd_plan =
+        PlanMusaInThreadSimd(T.target, this->type, src_buffer, dst_buffer,
+                             src_indice_compressed, src_var_compressed);
 
     Stmt reduce_local;
     if (simd_plan.enabled) {
@@ -342,30 +410,35 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
       PrimExpr idx_base =
           analyzer->Simplify(simd_plan.base + rv_outer * rv_scale);
 
-      Var vec4_var("vec4", DataType::Float(32, 4));
-      Var vec2_var("vec2", DataType::Float(32, 2));
-      PrimExpr vec0 = BufferLoad(
+      Var vec4_var("vec4", kFloat32x4);
+      Var vec2_var("vec2", kFloat32x2);
+      PrimExpr vec4_0 = BufferLoad(
           src_buffer, {Ramp(idx_base, make_const(idx_base.dtype(), 1), 4)});
-      PrimExpr vec1 = BufferLoad(
+      PrimExpr vec4_1 = BufferLoad(
           src_buffer,
           {Ramp(analyzer->Simplify(idx_base + make_const(idx_base.dtype(), 4)),
                 make_const(idx_base.dtype(), 1), 4)});
 
-      PrimExpr vec4_expr = Max(vec0, vec1);
-      PrimExpr vec2_0 = Shuffle({vec4_var}, {make_const(DataType::Int(32), 0),
-                                             make_const(DataType::Int(32), 1)});
-      PrimExpr vec2_1 = Shuffle({vec4_var}, {make_const(DataType::Int(32), 2),
-                                             make_const(DataType::Int(32), 3)});
-      PrimExpr vec2_expr = Max(vec2_0, vec2_1);
-      PrimExpr s0 = Shuffle({vec2_var}, {make_const(DataType::Int(32), 0)});
-      PrimExpr s1 = Shuffle({vec2_var}, {make_const(DataType::Int(32), 1)});
-      PrimExpr group_max =
-          Let(vec4_var, vec4_expr, Let(vec2_var, vec2_expr, Max(s0, s1)));
+      PrimExpr vec4_expr = Call(vec4_0.dtype(), builtin::call_pure_extern(),
+                                {StringImm("tl::vec_max_f4"), vec4_0, vec4_1});
+      PrimExpr vec2_0 =
+          Shuffle({vec4_var}, {make_const(kInt32, 0), make_const(kInt32, 1)});
+      PrimExpr vec2_1 =
+          Shuffle({vec4_var}, {make_const(kInt32, 2), make_const(kInt32, 3)});
+      PrimExpr vec2_expr = Call(vec2_0.dtype(), builtin::call_pure_extern(),
+                                {StringImm("tl::vec_max_f2"), vec2_0, vec2_1});
+      PrimExpr s0 = Shuffle({vec2_var}, {make_const(kInt32, 0)});
+      PrimExpr s1 = Shuffle({vec2_var}, {make_const(kInt32, 1)});
+      Var group_max_var("group_max", s0.dtype());
 
-      reduce_local = BufferStore(
-          clear_buffer,
-          this->MakeReduce(BufferLoad(clear_buffer, dst_indices), group_max),
-          dst_indices);
+      reduce_local =
+          BufferStore(clear_buffer,
+                      this->MakeReduce(BufferLoad(clear_buffer, dst_indices),
+                                       group_max_var),
+                      dst_indices);
+      reduce_local = LetStmt(group_max_var, Max(s0, s1), reduce_local);
+      reduce_local = LetStmt(vec2_var, vec2_expr, reduce_local);
+      reduce_local = LetStmt(vec4_var, vec4_expr, reduce_local);
       reduce_local =
           For(rv_outer, 0, make_const(rv_outer.dtype(), simd_plan.groups),
               ForKind::kUnrolled, reduce_local, std::nullopt,
@@ -389,19 +462,95 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
         src_vars.Map([](const auto &iv) { return PrimExpr(iv->var); }), {});
     auto iter_sum =
         arith::NormalizeToIterSum(src_thread, ToVMap(src_vars), analyzer);
+
+    MusaInterThreadSimdPlan simd_allreduce_plan =
+        PlanMusaInterThreadSimd(T.target, this->type, src_buffer, dst_buffer,
+                                dst_indices, dst_vars, dst_layout);
+
+    bool simd_allreduce_emitted = false;
     for (const auto &iter_split : iter_sum->args) {
       auto mark = iter_split->source->source.as<Var>();
       ICHECK(mark) << "Not a normalized iterator: " << iter_split->source;
-      if (mark.value().same_as(src_vars[this->dim]->var)) {
+      if (mark.value().same_as(src_vars[this->dim]->var)) { // reduce axis
         auto scale = as_const_int(iter_split->scale);
         auto extent = as_const_int(iter_split->extent);
         ICHECK(scale != nullptr && extent != nullptr);
         if (*extent == 1)
           continue;
-
         int reducing_threads = (*extent) * (*scale);
-        std::stringstream ss;
 
+        // fast path (use simd op)
+        if (simd_allreduce_plan.enabled && !simd_allreduce_emitted &&
+            reducing_threads <= 32) {
+          Optional<Var> dv_outer;
+          PrimExpr dv_base;
+          if (simd_allreduce_plan.groups > 1) {
+            dv_outer = Var(simd_allreduce_plan.dst_var->name_hint + "_vec",
+                           simd_allreduce_plan.dst_var->dtype);
+            PrimExpr dv_scale = make_const(dv_outer.value().dtype(), 4);
+            dv_base = analyzer->Simplify(simd_allreduce_plan.base +
+                                         dv_outer.value() * dv_scale);
+          } else {
+            dv_base = simd_allreduce_plan.base;
+          }
+          PrimExpr vec = BufferLoad(
+              clear_buffer, {Ramp(dv_base, make_const(dv_base.dtype(), 1), 4)});
+
+          int steps = 0;
+          for (int t = reducing_threads; t > *scale; t >>= 1) {
+            ++steps;
+          }
+          ICHECK(steps > 0);
+
+          // iter var [0, steps)
+          Var offset_iter("offset_step", kInt32);
+          // thread offset expr
+          PrimExpr offset_expr =
+              right_shift(make_const(offset_iter.dtype(), reducing_threads),
+                          offset_iter + make_const(offset_iter.dtype(), 1));
+          // thread offset var
+          Var offset_var("offset", kInt32);
+
+          Var local_max_var("local_max", kFloat32x4);
+          Var other_max_var("other_max", kFloat32x4);
+          PrimExpr local_max_expr = BufferLoad(
+              clear_buffer, {Ramp(dv_base, make_const(dv_base.dtype(), 1), 4)});
+          PrimExpr other_max_expr = Call(
+              kFloat32x4, builtin::call_pure_extern(),
+              {StringImm("tl::shfl_xor_sync"), make_const(kUInt32, 0xffffffff),
+               local_max_var, offset_var});
+          PrimExpr updated =
+              Call(kFloat32x4, builtin::call_pure_extern(),
+                   {StringImm("tl::vec_max_f4"), local_max_var, other_max_var});
+          Stmt update =
+              BufferStore(clear_buffer, updated,
+                          {Ramp(dv_base, make_const(dv_base.dtype(), 1), 4)});
+
+          Stmt loop_body = LetStmt(other_max_var, other_max_expr, update);
+          loop_body = LetStmt(local_max_var, local_max_expr, loop_body);
+          loop_body = LetStmt(offset_var, offset_expr, loop_body);
+
+          Stmt loop =
+              For(offset_iter, 0, make_const(offset_iter.dtype(), steps),
+                  ForKind::kUnrolled, loop_body, std::nullopt,
+                  {{tir::attr::pragma_unroll_explicit, Bool(false)}});
+          if (simd_allreduce_plan.groups > 1) {
+            ICHECK(dv_outer.defined());
+            Stmt group_loop =
+                For(dv_outer.value(), 0,
+                    make_const(dv_outer.value().dtype(),
+                               simd_allreduce_plan.groups),
+                    ForKind::kUnrolled, loop, std::nullopt,
+                    {{tir::attr::pragma_unroll_explicit, Bool(false)}});
+            stmts_after_loop.push_back(group_loop);
+          } else {
+            stmts_after_loop.push_back(loop);
+          }
+          simd_allreduce_emitted = true;
+          continue;
+        }
+
+        std::stringstream ss;
         auto thread_offset = T.thread_bounds->min;
         if (TargetIsHopper(T.target) || TargetIsSm100(T.target)) {
           auto all_threads = T.thread_bounds->extent;
@@ -456,6 +605,12 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     } else {
       PrimExpr guard = (T.thread_var == T.thread_bounds->min);
       body = IfThenElse(guard, body);
+    }
+
+    if (stmts_after_loop.size() > 0) {
+      Stmt after = stmts_after_loop.size() > 1 ? SeqStmt(stmts_after_loop)
+                                               : stmts_after_loop[0];
+      body = SeqStmt({body, after});
     }
 
     if (need_duplicate) {
