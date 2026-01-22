@@ -3,7 +3,7 @@ from tilelang import tvm as tvm
 from tilelang import language as T
 
 
-def test_let_vectorize_load():
+def let_vectorize_load():
 
     @T.prim_func
     def main(A_ptr: T.handle):
@@ -14,9 +14,13 @@ def test_let_vectorize_load():
                 b = A[0, 0:4]
                 A[0, 4:8] = b
 
-    mod = tvm.IRModule({"main": main})
-    mod = tvm.compile(mod, target="musa")
-    assert "float4 b" in mod.mod.imports[0].inspect_source()
+    return main
+
+
+def test_let_vectorize_load():
+    program = let_vectorize_load()
+    kernel = tilelang.compile(program, target="musa")
+    assert "float4 b" in kernel.get_kernel_source()
 
 
 if __name__ == "__main__":

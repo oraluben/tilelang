@@ -108,7 +108,6 @@ def test_sync_shared():
     tvm.ir.assert_structural_equal(mod["main"], expected)
 
 
-@tvm.testing.requires_musa
 def test_sync_let_stmt():
 
     @T.prim_func(private=True)
