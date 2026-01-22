@@ -44,9 +44,24 @@ struct MusaInterThreadSimdPlan {
   int64_t groups{0};
 };
 
+const char *GetMusaSimdExtern(const ReduceType &reduce_type, int lanes) {
+  ICHECK(lanes == 2 || lanes == 4);
+  if (reduce_type->isMax()) {
+    return lanes == 4 ? "tl::vec_max_f4" : "tl::vec_max_f2";
+  }
+  if (reduce_type->isSum()) {
+    return lanes == 4 ? "tl::vec_sum_f4" : "tl::vec_sum_f2";
+  }
+  LOG(FATAL) << "Unsupported reduce type for MUSA SIMD: " << reduce_type->type;
+  return "";
+}
+
 bool CheckMusaSimdCommon(const Target &target, const ReduceType &reduce_type,
                          const Buffer &src_buffer, const Buffer &dst_buffer) {
-  if (!TargetIsMusa(target) || !reduce_type->isMax()) {
+  if (!TargetIsMusa(target)) {
+    return false;
+  }
+  if (!reduce_type->isMax() && !reduce_type->isSum()) {
     return false;
   }
   if (!src_buffer->dtype.is_float() || src_buffer->dtype.bits() != 32 ||
@@ -398,7 +413,8 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
       src_var_compressed.push_back(var);
     }
 
-    // Use MUSA SIMD max when reduction is contiguous float32 with extent % 8.
+    // Use MUSA SIMD reduce when reduction is contiguous float32 with extent
+    // % 8.
     MusaInThreadSimdPlan simd_plan =
         PlanMusaInThreadSimd(T.target, this->type, src_buffer, dst_buffer,
                              src_indice_compressed, src_var_compressed);
@@ -419,24 +435,33 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
           {Ramp(analyzer->Simplify(idx_base + make_const(idx_base.dtype(), 4)),
                 make_const(idx_base.dtype(), 1), 4)});
 
-      PrimExpr vec4_expr = Call(vec4_0.dtype(), builtin::call_pure_extern(),
-                                {StringImm("tl::vec_max_f4"), vec4_0, vec4_1});
+      PrimExpr vec4_expr =
+          Call(vec4_0.dtype(), builtin::call_pure_extern(),
+               {StringImm(GetMusaSimdExtern(this->type, 4)), vec4_0, vec4_1});
       PrimExpr vec2_0 =
           Shuffle({vec4_var}, {make_const(kInt32, 0), make_const(kInt32, 1)});
       PrimExpr vec2_1 =
           Shuffle({vec4_var}, {make_const(kInt32, 2), make_const(kInt32, 3)});
-      PrimExpr vec2_expr = Call(vec2_0.dtype(), builtin::call_pure_extern(),
-                                {StringImm("tl::vec_max_f2"), vec2_0, vec2_1});
+      PrimExpr vec2_expr =
+          Call(vec2_0.dtype(), builtin::call_pure_extern(),
+               {StringImm(GetMusaSimdExtern(this->type, 2)), vec2_0, vec2_1});
       PrimExpr s0 = Shuffle({vec2_var}, {make_const(kInt32, 0)});
       PrimExpr s1 = Shuffle({vec2_var}, {make_const(kInt32, 1)});
-      Var group_max_var("group_max", s0.dtype());
+      Var group_reduce_var("group_reduce", s0.dtype());
+
+      if (require_init && simd_plan.groups == 1) {
+        stmts.pop_back();
+        reduce_local = BufferStore(clear_buffer, group_reduce_var, dst_indices);
+      } else {
+        reduce_local =
+            BufferStore(clear_buffer,
+                        this->MakeReduce(BufferLoad(clear_buffer, dst_indices),
+                                         group_reduce_var),
+                        dst_indices);
+      }
 
       reduce_local =
-          BufferStore(clear_buffer,
-                      this->MakeReduce(BufferLoad(clear_buffer, dst_indices),
-                                       group_max_var),
-                      dst_indices);
-      reduce_local = LetStmt(group_max_var, Max(s0, s1), reduce_local);
+          LetStmt(group_reduce_var, this->MakeReduce(s0, s1), reduce_local);
       reduce_local = LetStmt(vec2_var, vec2_expr, reduce_local);
       reduce_local = LetStmt(vec4_var, vec4_expr, reduce_local);
       reduce_local =
@@ -511,23 +536,23 @@ Stmt ReduceOpNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
           // thread offset var
           Var offset_var("offset", kInt32);
 
-          Var local_max_var("local_max", kFloat32x4);
-          Var other_max_var("other_max", kFloat32x4);
-          PrimExpr local_max_expr = BufferLoad(
+          Var local_vec_var("local_vec", kFloat32x4);
+          Var other_vec_var("other_vec", kFloat32x4);
+          PrimExpr local_vec_expr = BufferLoad(
               clear_buffer, {Ramp(dv_base, make_const(dv_base.dtype(), 1), 4)});
-          PrimExpr other_max_expr = Call(
+          PrimExpr other_vec_expr = Call(
               kFloat32x4, builtin::call_pure_extern(),
               {StringImm("tl::shfl_xor_sync"), make_const(kUInt32, 0xffffffff),
-               local_max_var, offset_var});
-          PrimExpr updated =
-              Call(kFloat32x4, builtin::call_pure_extern(),
-                   {StringImm("tl::vec_max_f4"), local_max_var, other_max_var});
+               local_vec_var, offset_var});
+          PrimExpr updated = Call(kFloat32x4, builtin::call_pure_extern(),
+                                  {StringImm(GetMusaSimdExtern(this->type, 4)),
+                                   local_vec_var, other_vec_var});
           Stmt update =
               BufferStore(clear_buffer, updated,
                           {Ramp(dv_base, make_const(dv_base.dtype(), 1), 4)});
 
-          Stmt loop_body = LetStmt(other_max_var, other_max_expr, update);
-          loop_body = LetStmt(local_max_var, local_max_expr, loop_body);
+          Stmt loop_body = LetStmt(other_vec_var, other_vec_expr, update);
+          loop_body = LetStmt(local_vec_var, local_vec_expr, loop_body);
           loop_body = LetStmt(offset_var, offset_expr, loop_body);
 
           Stmt loop =

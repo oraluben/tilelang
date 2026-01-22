@@ -1281,6 +1281,8 @@ void CodeGenTileLangMUSA::PrintCallExtern(Type ret_type, String global_symbol,
   if (ret_dtype.is_fixed_length_vector()) {
     if (global_symbol == "tl::vec_max_f2" ||
         global_symbol == "tl::vec_max_f4" ||
+        global_symbol == "tl::vec_sum_f2" ||
+        global_symbol == "tl::vec_sum_f4" ||
         global_symbol == "tl::shfl_xor_sync") {
       std::vector<std::string> sargs;
       size_t arg_begin = static_cast<size_t>(skip_first_arg);
