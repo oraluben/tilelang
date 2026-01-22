@@ -376,4 +376,21 @@ TL_DEVICE float4 vec_max_f4(float4 a, float4 b) {
   return out;
 }
 
+TL_DEVICE float2 vec_sum_f2(float2 a, float2 b) {
+  float2 out;
+  mute::add(out, a, b);
+  return out;
+}
+
+TL_DEVICE float4 vec_sum_f4(float4 a, float4 b) {
+  float4 out;
+  out.x = a.x + b.x;
+  out.y = a.y + b.y;
+  out.z = a.z + b.z;
+  out.w = a.w + b.w;
+  // todo: check bug
+  // mute::add(out, a, b);
+  return out;
+}
+
 } // namespace tl
