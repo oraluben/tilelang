@@ -276,6 +276,22 @@ TL_DEVICE T shfl_xor_sync(unsigned mask, T val, int laneMask) {
   return __shfl_xor_sync(mask, val, laneMask);
 }
 
+TL_DEVICE float2 shfl_xor_sync(unsigned mask, float2 val, int laneMask) {
+  float2 out;
+  out.x = __shfl_xor_sync(mask, val.x, laneMask);
+  out.y = __shfl_xor_sync(mask, val.y, laneMask);
+  return out;
+}
+
+TL_DEVICE float4 shfl_xor_sync(unsigned mask, float4 val, int laneMask) {
+  float4 out;
+  out.x = __shfl_xor_sync(mask, val.x, laneMask);
+  out.y = __shfl_xor_sync(mask, val.y, laneMask);
+  out.z = __shfl_xor_sync(mask, val.z, laneMask);
+  out.w = __shfl_xor_sync(mask, val.w, laneMask);
+  return out;
+}
+
 template <typename T>
 TL_DEVICE T shfl_down_sync(unsigned mask, T val, int delta) {
   return __shfl_down_sync(mask, val, delta);
@@ -346,6 +362,18 @@ TL_DEVICE bfloat16_t shfl_sync(unsigned mask, bfloat16_t val, int srcLane) {
   float f = static_cast<float>(val);
   float r = __shfl_sync(mask, f, srcLane);
   return bfloat16_t(r);
+}
+
+TL_DEVICE float2 vec_max_f2(float2 a, float2 b) {
+  float2 out;
+  mute::max(out, a, b);
+  return out;
+}
+
+TL_DEVICE float4 vec_max_f4(float4 a, float4 b) {
+  float4 out;
+  mute::max(out, a, b);
+  return out;
 }
 
 } // namespace tl
