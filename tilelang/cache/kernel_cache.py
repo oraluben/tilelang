@@ -136,7 +136,11 @@ class KernelCache:
         Returns:
             JITKernel: The compiled kernel, either freshly compiled or from cache
         """
-        if not env.is_cache_enabled():
+        # Skip cache if caching is disabled or custom source is specified
+        custom_source = env.TILELANG_REPLACE_MUSAC
+        if not env.is_cache_enabled() or custom_source:
+            if verbose and custom_source:
+                self.logger.info(f"Replacing Musa C with: {custom_source}, skipping cache")
             return JITKernel(
                 func,
                 out_idx=out_idx,
