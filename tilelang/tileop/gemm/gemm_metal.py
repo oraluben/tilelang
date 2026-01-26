@@ -6,6 +6,16 @@ from tvm import tir
 from tilelang import language as T
 from tilelang.transform.simplify import _Simplify
 
+from tilelang.layout import make_swizzled_layout
+
 
 class GemmMetal(GemmBase):
-    pass
+    def infer_layout(self, target: Target, thread_nums: int):
+        return {
+            self.A: make_swizzled_layout(self.A),
+            self.B: make_swizzled_layout(self.B),
+            self.C: make_swizzled_layout(self.C),
+        }
+
+    def lower(self, layout_map: dict, target: Target, thread_nums: int, thread_var: tir.Var):
+        assert False
