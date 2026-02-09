@@ -249,8 +249,9 @@ elseif(USE_CUDA)
   # This library provides drop-in replacements for NVRTC API functions.
   # Instead of linking directly against libnvrtc.so (which encodes the
   # version-specific DT_NEEDED, e.g., libnvrtc.so.12 or libnvrtc.so.13),
-  # we link against this stub which loads the correct libnvrtc.so lazily
-  # at runtime on first API call, enabling one wheel for CUDA 12 and 13.
+  # we link against this stub which resolves NVRTC symbols already loaded
+  # in the process (e.g., by PyTorch) via dlsym(RTLD_DEFAULT, ...),
+  # enabling one wheel for CUDA 12 and 13.
   # ============================================================================
   add_library(nvrtc_stub SHARED src/target/stubs/nvrtc.cc)
   target_compile_definitions(nvrtc_stub PRIVATE TILELANG_NVRTC_STUB_EXPORTS)
