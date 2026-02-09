@@ -9,7 +9,6 @@ packaging
 pre-commit>=4.0.0
 scikit-build-core
 setuptools>=61
-torch
 wheel
 z3-solver>=4.13.0,<4.15.5
 
