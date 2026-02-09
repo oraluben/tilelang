@@ -243,6 +243,25 @@ elseif(USE_CUDA)
     OUTPUT_NAME "cuda_stub"
   )
 
+  # ============================================================================
+  # NVRTC Stub Library (libnvrtc_stub.so)
+  # ============================================================================
+  # This library provides drop-in replacements for NVRTC API functions.
+  # Instead of linking directly against libnvrtc.so (which encodes the
+  # version-specific DT_NEEDED, e.g., libnvrtc.so.12 or libnvrtc.so.13),
+  # we link against this stub which loads the correct libnvrtc.so lazily
+  # at runtime on first API call, enabling one wheel for CUDA 12 and 13.
+  # ============================================================================
+  add_library(nvrtc_stub SHARED src/target/stubs/nvrtc.cc)
+  target_compile_definitions(nvrtc_stub PRIVATE TILELANG_NVRTC_STUB_EXPORTS)
+  target_link_libraries(nvrtc_stub PRIVATE ${CMAKE_DL_LIBS})
+  set_target_properties(nvrtc_stub PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    OUTPUT_NAME "nvrtc_stub"
+  )
+
   file(GLOB TILE_LANG_CUDA_SRCS
     src/runtime/runtime.cc
     src/target/ptx.cc
@@ -257,6 +276,11 @@ elseif(USE_CUDA)
 
   list(APPEND TILE_LANG_INCLUDES ${CUDAToolkit_INCLUDE_DIRS})
   link_directories(${CUDAToolkit_LIBRARY_DIR} ${CUDAToolkit_LIBRARY_DIR}/stubs)
+
+  # Override CUDA_NVRTC_LIBRARY so that TVM's cmake links against our
+  # nvrtc_stub instead of the real libnvrtc.so, avoiding a version-specific
+  # DT_NEEDED entry (libnvrtc.so.12 vs libnvrtc.so.13).
+  set(CUDA_NVRTC_LIBRARY nvrtc_stub CACHE STRING "NVRTC stub library" FORCE)
 endif()
 
 set(USE_Z3      ON CACHE STRING "Use Z3 SMT solver for TileLang optimizations")
@@ -355,11 +379,14 @@ if(USE_CUDA)
   # Link against CUDA stub library instead of libcuda.so
   # This enables lazy loading of libcuda.so at runtime, allowing
   # `import tilelang` to succeed on CPU-only machines.
+  # Link against NVRTC stub library instead of libnvrtc.so
+  # This enables one wheel for CUDA 12 and 13 by removing the
+  # version-specific DT_NEEDED entry (libnvrtc.so.12 vs libnvrtc.so.13).
   foreach(target IN LISTS TILELANG_OUTPUT_TARGETS)
-    target_link_libraries(${target} PUBLIC cuda_stub)
+    target_link_libraries(${target} PUBLIC cuda_stub nvrtc_stub)
   endforeach()
-  # Include CUDA stub in output targets for RPATH configuration
-  list(APPEND TILELANG_OUTPUT_TARGETS cuda_stub)
+  # Include stubs in output targets for RPATH configuration
+  list(APPEND TILELANG_OUTPUT_TARGETS cuda_stub nvrtc_stub)
 endif()
 
 unset(PATCHELF_EXECUTABLE CACHE)
@@ -394,22 +421,23 @@ foreach(target IN LISTS TILELANG_OUTPUT_TARGETS)
   )
 endforeach()
 
-# Exclude libcuda.so to allow importing on a CPU-only machine
+# Exclude libcuda.so and libnvrtc.so to allow importing on a CPU-only machine
+# and to enable one wheel for CUDA 12 and 13.
 if(USE_CUDA AND PATCHELF_EXECUTABLE)
-  # Run `patchelf` on built libraries to remove libcuda.so dependency.
+  # Run `patchelf` on built libraries to remove libcuda.so and libnvrtc.so dependencies.
   # Use `install(CODE ...)` instead of `add_custom_command(... POST_BUILD ...)`
   # to avoid race conditions during linking.
   foreach(target IN LISTS TILELANG_OUTPUT_TARGETS)
     install(CODE "
       execute_process(
-        COMMAND ${PATCHELF_EXECUTABLE} --remove-needed libcuda.so.1 --remove-needed libcuda.so \"$<TARGET_FILE:${target}>\"
+        COMMAND ${PATCHELF_EXECUTABLE} --remove-needed libcuda.so.1 --remove-needed libcuda.so --remove-needed libnvrtc.so --remove-needed libnvrtc.so.12 --remove-needed libnvrtc.so.13 \"$<TARGET_FILE:${target}>\"
         WORKING_DIRECTORY \"${CMAKE_INSTALL_PREFIX}\"
         RESULT_VARIABLE patchelf_result
       )
       if(patchelf_result EQUAL 0)
-        message(STATUS \"`patchelf` successfully removed dependency `libcuda.so` from $<TARGET_FILE:${target}>\")
+        message(STATUS \"`patchelf` successfully removed dependency `libcuda.so` and `libnvrtc.so` from $<TARGET_FILE:${target}>\")
       else()
-        message(WARNING \"`patchelf` failed to remove dependency `libcuda.so` from $<TARGET_FILE:${target}>\")
+        message(WARNING \"`patchelf` failed to remove dependency `libcuda.so` and `libnvrtc.so` from $<TARGET_FILE:${target}>\")
       endif()
     ")
   endforeach()
