@@ -8,6 +8,7 @@ Usage:
     python find_pip_cuda.py /path/to/cu13  # use explicit path, just prepare it
 """
 
+import contextlib
 import json
 import pathlib
 import subprocess
@@ -43,19 +44,15 @@ def _ensure_lib_symlinks(cu_dir):
     # nvcc expects lib64/ on 64-bit
     lib64 = cu_dir / "lib64"
     if not lib64.exists():
-        try:
+        with contextlib.suppress(OSError):
             lib64.symlink_to("lib")
-        except OSError:
-            pass
 
     # CMake expects unversioned .so (e.g., libcudart.so)
     for so in lib_dir.glob("*.so.*"):
         base = lib_dir / (so.name.split(".so.")[0] + ".so")
         if not base.exists():
-            try:
+            with contextlib.suppress(OSError):
                 base.symlink_to(so.name)
-            except OSError:
-                pass
 
 
 def _ensure_cuda_stub(cu_dir):
@@ -92,10 +89,14 @@ def main():
     _ensure_lib_symlinks(cu_dir)
     _ensure_cuda_stub(cu_dir)
 
-    print(json.dumps({
-        "nvcc": str(cu_dir / "bin" / "nvcc"),
-        "root": str(cu_dir),
-    }))
+    print(
+        json.dumps(
+            {
+                "nvcc": str(cu_dir / "bin" / "nvcc"),
+                "root": str(cu_dir),
+            }
+        )
+    )
 
 
 if __name__ == "__main__":
