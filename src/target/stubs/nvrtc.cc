@@ -2,13 +2,14 @@
  * \file nvrtc.cc
  * \brief Implementation of NVRTC API stub library.
  *
- * This file implements lazy loading of libnvrtc.so and provides global wrapper
- * functions that serve as drop-in replacements for the NVRTC API.
+ * This file resolves NVRTC symbols that are already loaded in the current
+ * process (e.g., by PyTorch) using dlsym(RTLD_DEFAULT, ...).
  *
- * The library is loaded on first API call using dlopen(). This allows
- * tilelang to be built against one CUDA version while working with
- * another at runtime, since the versioned libnvrtc.so (e.g., libnvrtc.so.12
- * or libnvrtc.so.13) is resolved dynamically.
+ * Unlike the CUDA driver stub (cuda.cc) which uses dlopen() to load
+ * libcuda.so, NVRTC symbols are expected to already be in memory.
+ * Using RTLD_DEFAULT ensures we reuse the exact same libnvrtc that the
+ * framework (e.g., torch) has already loaded, avoiding version mismatches
+ * that could occur if we dlopen()-ed a different copy.
  */
 
 #include "nvrtc.h"
@@ -21,35 +22,18 @@ namespace tvm::tl::nvrtc {
 
 namespace {
 
-// Library names to try loading (in order of preference)
-constexpr const char *kLibNvrtcPaths[] = {
-    "libnvrtc.so.12", // CUDA 12.x
-    "libnvrtc.so.13", // CUDA 13.x
-    "libnvrtc.so",    // Unversioned library
-};
-
 /**
- * \brief Try to load libnvrtc.so from various paths.
- * \return The dlopen handle, or nullptr if loading failed.
+ * \brief Get symbol already loaded in the process, returning nullptr on
+ * failure.
+ *
+ * Uses RTLD_DEFAULT to search all shared objects in the process — this
+ * finds the libnvrtc symbols that torch (or another framework) has already
+ * loaded, without opening a separate copy of the library.
  */
-void *try_load_libnvrtc() {
-  void *handle = nullptr;
-  for (const char *path : kLibNvrtcPaths) {
-    handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
-    if (handle != nullptr) {
-      break;
-    }
-  }
-  return handle;
-}
-
-/**
- * \brief Get symbol from library handle, returning nullptr on failure.
- */
-template <typename T> T get_symbol(void *handle, const char *name) {
+template <typename T> T get_symbol(const char *name) {
   // Clear any existing error
   (void)dlerror();
-  void *sym = dlsym(handle, name);
+  void *sym = dlsym(RTLD_DEFAULT, name);
   // Check for error (symbol could legitimately be nullptr in some cases)
   const char *error = dlerror();
   if (error != nullptr) {
@@ -61,7 +45,7 @@ template <typename T> T get_symbol(void *handle, const char *name) {
 /**
  * \brief Create and initialize the NVRTCApi singleton.
  *
- * This function loads libnvrtc.so and resolves all function symbols.
+ * Resolves all NVRTC function symbols from the already-loaded process image.
  * Required symbols that are missing will cause an exception.
  *
  * \return The initialized NVRTCApi instance.
@@ -69,15 +53,10 @@ template <typename T> T get_symbol(void *handle, const char *name) {
  */
 NVRTCApi create_nvrtc_api() {
   NVRTCApi api{};
-  void *handle = NVRTCApi::get_handle();
-
-  if (handle == nullptr) {
-    return api;
-  }
 
 // Lookup required symbols - throw if missing
 #define LOOKUP_REQUIRED(name)                                                  \
-  api.name##_ = get_symbol<decltype(&name)>(handle, #name);                    \
+  api.name##_ = get_symbol<decltype(&name)>(#name);                            \
   if (api.name##_ == nullptr) {                                                \
     const char *error = dlerror();                                             \
     throw std::runtime_error(                                                  \
@@ -92,21 +71,18 @@ NVRTCApi create_nvrtc_api() {
 
 } // namespace
 
-void *NVRTCApi::get_handle() {
-  // Static handle ensures library is loaded only once
-  static void *handle = try_load_libnvrtc();
-  return handle;
+bool NVRTCApi::is_available() {
+  // Check if at least one NVRTC symbol is already loaded in the process
+  return dlsym(RTLD_DEFAULT, "nvrtcCreateProgram") != nullptr;
 }
-
-bool NVRTCApi::is_available() { return get_handle() != nullptr; }
 
 NVRTCApi *NVRTCApi::get() {
   static NVRTCApi singleton = create_nvrtc_api();
 
   if (!is_available()) {
     throw std::runtime_error(
-        "NVRTC library (libnvrtc.so) not found. "
-        "Please ensure CUDA toolkit is installed.");
+        "NVRTC symbols not found in the current process. "
+        "Please ensure a CUDA runtime (e.g., PyTorch) has loaded libnvrtc.");
   }
 
   return &singleton;

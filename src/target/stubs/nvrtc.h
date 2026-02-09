@@ -1,11 +1,13 @@
 /**
  * \file nvrtc.h
- * \brief Stub library for lazy loading libnvrtc.so at runtime.
+ * \brief Stub library for resolving NVRTC symbols already loaded in the process.
  *
  * This library provides drop-in replacements for NVRTC API functions.
- * It allows tilelang to be built against a single CUDA version while
- * working with both CUDA 12 and 13 at runtime, since the actual
- * libnvrtc.so is loaded lazily on first API call via dlopen().
+ * Unlike the CUDA driver stub which uses dlopen(), NVRTC symbols are
+ * expected to already be in the process memory (e.g., loaded by PyTorch).
+ * Symbols are resolved via dlsym(RTLD_DEFAULT, ...) to ensure we reuse
+ * the exact same libnvrtc copy that the framework loaded, avoiding
+ * version mismatches.
  *
  * Usage:
  *
@@ -64,11 +66,12 @@
 namespace tvm::tl::nvrtc {
 
 /**
- * \brief NVRTC API accessor struct with lazy loading support.
+ * \brief NVRTC API accessor struct with lazy symbol resolution.
  *
- * This struct provides lazy loading of libnvrtc.so symbols at first use,
- * allowing tilelang to be built against one CUDA version while working
- * with another at runtime.
+ * This struct resolves NVRTC symbols already loaded in the process
+ * (e.g., by PyTorch) via dlsym(RTLD_DEFAULT, ...).  Unlike the CUDA
+ * driver stub, no dlopen() is performed — we reuse the exact copy of
+ * libnvrtc that the framework has already loaded.
  *
  * Usage:
  *   nvrtcResult result = NVRTCApi::get()->nvrtcCreateProgram_(...);
@@ -82,28 +85,21 @@ struct TILELANG_NVRTC_STUB_API NVRTCApi {
   /**
    * \brief Get the singleton instance of NVRTCApi.
    *
-   * On first call, this loads libnvrtc.so and resolves all symbols.
+   * On first call, this resolves all NVRTC symbols from the process image.
    * Subsequent calls return the cached instance.
    *
    * \return Pointer to the singleton NVRTCApi instance.
-   * \throws std::runtime_error if libnvrtc.so cannot be loaded or
-   *         required symbols are missing.
+   * \throws std::runtime_error if NVRTC symbols are not found in the
+   *         current process.
    */
   static NVRTCApi *get();
 
   /**
-   * \brief Check if NVRTC library is available without throwing.
+   * \brief Check if NVRTC symbols are available without throwing.
    *
-   * \return true if libnvrtc.so can be loaded, false otherwise.
+   * \return true if NVRTC symbols are found in the current process.
    */
   static bool is_available();
-
-  /**
-   * \brief Get the raw library handle for libnvrtc.so.
-   *
-   * \return The dlopen handle, or nullptr if not loaded.
-   */
-  static void *get_handle();
 };
 
 } // namespace tvm::tl::nvrtc
