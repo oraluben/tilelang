@@ -5,8 +5,8 @@
 **Prerequisites for installation via wheel or PyPI:**
 
 - **glibc**: 2.28 (Ubuntu 20.04 or later)
-- **Python Version**: >= 3.8
-- **CUDA Version**: 12.0 <= CUDA < 13
+- **Python Version**: >= 3.9
+- **CUDA Version**: >= 10.0 (host installation), or pip-provided CUDA toolchain (>= 13.0)
 
 The easiest way to install tilelang is directly from PyPI using pip. To install the latest version, run the following command in your terminal:
 
@@ -37,8 +37,8 @@ python -c "import tilelang; print(tilelang.__version__)"
 **Prerequisites for building from source:**
 
 - **Operating System**: Linux
-- **Python Version**: >= 3.8
-- **CUDA Version**: >= 10.0 (host installation), or pip-provided CUDA toolchain
+- **Python Version**: >= 3.9
+- **CUDA Version**: >= 10.0 (host installation), or pip-provided CUDA toolchain (>= 13.0)
 
 If you prefer Docker, please skip to the [Install Using Docker](#install-using-docker) section. This section focuses on building from source on a native Linux environment.
 
@@ -71,7 +71,7 @@ If you don't have CUDA installed on the host, you can use pip-provided CUDA pack
 git clone --recursive https://github.com/tile-ai/tilelang.git
 cd tilelang
 pip install -r requirements-dev.txt
-pip install nvidia-cuda-nvcc nvidia-cuda-cccl nvidia-cuda-nvrtc
+pip install "nvidia-cuda-nvcc>=13" "nvidia-cuda-cccl>=13" "nvidia-cuda-nvrtc>=13"
 pip install . -v --no-build-isolation
 ```
 
