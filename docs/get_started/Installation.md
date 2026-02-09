@@ -70,7 +70,8 @@ If you don't have CUDA installed on the host, you can use pip-provided CUDA pack
 ```bash
 git clone --recursive https://github.com/tile-ai/tilelang.git
 cd tilelang
-pip install nvidia-cuda-nvcc nvidia-cuda-cccl
+pip install -r requirements-dev.txt
+pip install nvidia-cuda-nvcc nvidia-cuda-cccl nvidia-cuda-nvrtc
 pip install . -v --no-build-isolation
 ```
 
