@@ -426,9 +426,10 @@ def get_target_compute_version(target=None):
         cuda_ver = get_cuda_version()
         major = cuda_ver[0]
         if major >= 13:
-            return "7.5"
-        else:
-            return "5.0"
+            return "10.0"
+        if major >= 12:
+            return "9.0"
+        return "8.0"
     except Exception:
         pass
 

@@ -135,6 +135,34 @@ TVM_ROOT=<your-tvm-repo> pip install . -v
 
 > **Note**: This will still rebuild the TVM-related libraries (stored in `TL_LIBS`). And this method often leads to some path issues. Check `env.py` to see some environment variables which are not set properly.
 
+### Compiling Kernels Without a GPU
+
+TileLang can generate and compile CUDA kernels on machines that have the CUDA
+toolkit (nvcc) but **no physical GPU**.  This is useful for CI servers, build
+farms, and laptop development.
+
+**Automatic mode** – When `target="auto"` (the default) and no GPU is detected,
+TileLang infers a default architecture from the installed toolkit version:
+
+| CUDA toolkit | Default arch |
+|---|---|
+| ≥ 13 | `sm_100` (Blackwell) |
+| 12.x | `sm_90`  (Hopper) |
+| < 12 | `sm_80`  (Ampere) |
+
+```python
+import tilelang
+
+# Works even without a GPU – arch is inferred from nvcc
+kernel = tilelang.compile(my_func)
+```
+
+**Manual mode** – Pass an explicit architecture to override:
+
+```python
+kernel = tilelang.compile(my_func, target="cuda -arch=sm_80")
+```
+
 (install-using-docker)=
 
 ## Install Using Docker

@@ -121,45 +121,64 @@ def _default_cuda_arch_from_nvcc() -> str:
     """Return a default ``sm_XX`` arch suffix derived from the NVCC version.
 
     When no GPU device is available we cannot query the device capability.
-    Instead we pick the *minimum* architecture supported by the installed NVCC
-    so that generated code is compatible with the widest range of devices.
+    The mapping picks a representative architecture for each toolkit generation:
 
-    The mapping is based on NVIDIA's deprecation schedule:
-      * CUDA 10-11 : sm_30+
-      * CUDA 12    : sm_50+
-      * CUDA >= 13 : sm_75+ (Turing)
+      * CUDA >= 13 : sm_100 (Blackwell)
+      * CUDA 12    : sm_90  (Hopper)
+      * CUDA < 12  : sm_80  (Ampere)
     """
-    import logging as _logging
-
-    _log = _logging.getLogger(__name__)
     try:
-        cuda_ver = nvcc.get_cuda_version()
-        major = cuda_ver[0]
+        major = nvcc.get_cuda_version()[0]
     except Exception:
-        _log.debug("Could not detect CUDA version; falling back to sm_80")
         return "80"
 
     if major >= 13:
-        return "75"
-    # CUDA 12 and earlier all support sm_50
-    return "50"
+        return "100"
+    if major >= 12:
+        return "90"
+    return "80"
+
+
+def _infer_cuda_arch() -> str | None:
+    """Infer the CUDA architecture string (e.g. ``"sm_90a"``).
+
+    Resolution order:
+      1. ``torch.cuda.get_device_capability`` (real GPU present)
+      2. ``_default_cuda_arch_from_nvcc``      (nvcc available, no GPU)
+
+    Returns ``None`` when neither source is available.
+    """
+    # 1. torch knows the device capability
+    if torch.cuda.is_available():
+        cap = torch.cuda.get_device_capability(0)
+        if cap:
+            return f"sm_{nvcc.get_target_arch(cap)}"
+
+    # 2. nvcc is available – pick a default based on toolkit version
+    if check_cuda_availability():
+        return f"sm_{_default_cuda_arch_from_nvcc()}"
+
+    return None
 
 
 def determine_target(target: str | Target | Literal["auto"] = "auto", return_object: bool = False) -> str | Target:
     """
     Determine the appropriate target for compilation (CUDA, HIP, or manual selection).
 
+    The CUDA architecture is resolved as follows:
+
+    1. If the caller explicitly specifies ``-arch=sm_XX``, use it.
+    2. Else if ``torch`` can report the device capability, use that.
+    3. Else if nvcc is available, derive a default from the toolkit version.
+    4. Otherwise fall back to TVM's built-in default.
+
     Args:
-        target (Union[str, Target, Literal["auto"]]): User-specified target.
-            - If "auto", the system will automatically detect whether CUDA or HIP is available.
-            - If a string or Target, it is directly validated.
+        target: ``"auto"`` for auto-detection, or an explicit target string /
+            ``Target`` object.
+        return_object: When *True*, always return a ``Target`` object.
 
     Returns:
-        Union[str, Target]: The selected target ("cuda", "hip", or a valid Target object).
-
-    Raises:
-        ValueError: If no CUDA or HIP is available and the target is "auto".
-        AssertionError: If the target is invalid.
+        The selected target.
     """
 
     return_var: str | Target = target
@@ -168,16 +187,17 @@ def determine_target(target: str | Target | Literal["auto"] = "auto", return_obj
         target = tvm.target.Target.current(allow_none=True)
         if target is not None:
             return target
+
         # Check for CUDA and HIP availability
         is_cuda_available = check_cuda_availability()
         is_hip_available = check_hip_availability()
 
-        # Determine the target based on availability
         if is_cuda_available:
-            if torch.cuda.is_available() and (cap := torch.cuda.get_device_capability(0)):
-                return_var = Target({"kind": "cuda", "arch": f"sm_{nvcc.get_target_arch(cap)}"})
+            arch = _infer_cuda_arch()
+            if arch is not None:
+                return_var = Target({"kind": "cuda", "arch": arch})
             else:
-                return_var = Target({"kind": "cuda", "arch": f"sm_{_default_cuda_arch_from_nvcc()}"})
+                return_var = "cuda"
 
         elif is_hip_available:
             return_var = "hip"
@@ -198,7 +218,6 @@ def determine_target(target: str | Target | Literal["auto"] = "auto", return_obj
 
             return_var = possible_cutedsl_target
         else:
-            # Validate the target if it's not "auto"
             if isinstance(target, Target):
                 return_var = target
             elif isinstance(target, str):
@@ -213,14 +232,11 @@ def determine_target(target: str | Target | Literal["auto"] = "auto", return_obj
                         f"Target {target} is not supported. Supported targets include: {examples}. "
                         "Pass additional options after the base name, e.g. `cuda -arch=sm_80`."
                     ) from err
-                # When the user passes a bare "cuda" string (no explicit arch),
-                # infer the architecture from the GPU or the CUDA toolkit so that
-                # the default sm_50 set by TVM does not clash with newer nvcc.
+                # Bare "cuda" without explicit arch – try to infer it
                 if parsed.kind.name == "cuda" and "-arch" not in normalized_target:
-                    if torch.cuda.is_available() and (cap := torch.cuda.get_device_capability(0)):
-                        return_var = Target({"kind": "cuda", "arch": f"sm_{nvcc.get_target_arch(cap)}"})
-                    elif check_cuda_availability():
-                        return_var = Target({"kind": "cuda", "arch": f"sm_{_default_cuda_arch_from_nvcc()}"})
+                    arch = _infer_cuda_arch()
+                    if arch is not None:
+                        return_var = Target({"kind": "cuda", "arch": arch})
                     else:
                         return_var = normalized_target
                 else:
