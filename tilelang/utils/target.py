@@ -117,6 +117,36 @@ def normalize_cutedsl_target(target: str | Target) -> Target | None:
     return None
 
 
+def _default_cuda_arch_from_nvcc() -> str:
+    """Return a default ``sm_XX`` arch suffix derived from the NVCC version.
+
+    When no GPU device is available we cannot query the device capability.
+    Instead we pick the *minimum* architecture supported by the installed NVCC
+    so that generated code is compatible with the widest range of devices.
+
+    The mapping is based on NVIDIA's deprecation schedule:
+      * CUDA 10-11 : sm_30+
+      * CUDA 12    : sm_50+
+      * CUDA >= 13 : sm_75+ (Turing)
+    """
+    import logging as _logging
+
+    _log = _logging.getLogger(__name__)
+    try:
+        cuda_ver = nvcc.get_cuda_version()
+        major = cuda_ver[0]
+    except Exception:
+        _log.debug("Could not detect CUDA version; falling back to sm_80")
+        return "80"
+
+    if major >= 13:
+        return "75"
+    elif major >= 12:
+        return "50"
+    else:
+        return "50"
+
+
 def determine_target(target: str | Target | Literal["auto"] = "auto", return_object: bool = False) -> str | Target:
     """
     Determine the appropriate target for compilation (CUDA, HIP, or manual selection).
@@ -149,7 +179,8 @@ def determine_target(target: str | Target | Literal["auto"] = "auto", return_obj
             if torch.cuda.is_available() and (cap := torch.cuda.get_device_capability(0)):
                 return_var = Target({"kind": "cuda", "arch": f"sm_{nvcc.get_target_arch(cap)}"})
             else:
-                return_var = "cuda"
+                return_var = Target({"kind": "cuda", "arch": f"sm_{_default_cuda_arch_from_nvcc()}"})
+
         elif is_hip_available:
             return_var = "hip"
         elif check_metal_availability():
@@ -177,14 +208,25 @@ def determine_target(target: str | Target | Literal["auto"] = "auto", return_obj
                 if not normalized_target:
                     raise AssertionError(f"Target {target} is not supported")
                 try:
-                    Target(normalized_target)
+                    parsed = Target(normalized_target)
                 except Exception as err:
                     examples = ", ".join(f"`{name}`" for name in SUPPORTED_TARGETS)
                     raise AssertionError(
                         f"Target {target} is not supported. Supported targets include: {examples}. "
                         "Pass additional options after the base name, e.g. `cuda -arch=sm_80`."
                     ) from err
-                return_var = normalized_target
+                # When the user passes a bare "cuda" string (no explicit arch),
+                # infer the architecture from the GPU or the CUDA toolkit so that
+                # the default sm_50 set by TVM does not clash with newer nvcc.
+                if parsed.kind.name == "cuda" and "-arch" not in normalized_target:
+                    if torch.cuda.is_available() and (cap := torch.cuda.get_device_capability(0)):
+                        return_var = Target({"kind": "cuda", "arch": f"sm_{nvcc.get_target_arch(cap)}"})
+                    elif check_cuda_availability():
+                        return_var = Target({"kind": "cuda", "arch": f"sm_{_default_cuda_arch_from_nvcc()}"})
+                    else:
+                        return_var = normalized_target
+                else:
+                    return_var = normalized_target
             else:
                 raise AssertionError(f"Target {target} is not supported")
 

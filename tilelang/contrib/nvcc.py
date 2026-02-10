@@ -421,6 +421,17 @@ def get_target_compute_version(target=None):
     if tvm.cuda(0).exist:
         return tvm.cuda(0).compute_version
 
+    # 4. Fallback: derive a default from the CUDA toolkit version
+    try:
+        cuda_ver = get_cuda_version()
+        major = cuda_ver[0]
+        if major >= 13:
+            return "7.5"
+        else:
+            return "5.0"
+    except Exception:
+        pass
+
     raise ValueError("No CUDA architecture was specified or GPU detected.Try specifying it by adding '-arch=sm_xx' to your target.")
 
 
