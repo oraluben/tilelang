@@ -141,10 +141,8 @@ def _default_cuda_arch_from_nvcc() -> str:
 
     if major >= 13:
         return "75"
-    elif major >= 12:
-        return "50"
-    else:
-        return "50"
+    # CUDA 12 and earlier all support sm_50
+    return "50"
 
 
 def determine_target(target: str | Target | Literal["auto"] = "auto", return_object: bool = False) -> str | Target:
