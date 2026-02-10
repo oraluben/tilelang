@@ -17,6 +17,10 @@
  * CUDA 11/12/13 available (as long as the required symbols exist).
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <nvrtc.h>
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
@@ -27,47 +31,32 @@
 
 #include <dlfcn.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 // Export symbols with default visibility for the shared stub library.
 #define TILELANG_NVRTC_STUB_API __attribute__((visibility("default")))
 
 namespace {
 
-// Try multiple major versions for cross-toolkit compatibility.
-constexpr const char *kLibNvrtcPaths[] = {
-    "libnvrtc.so.13",
-    "libnvrtc.so.12",
-    // CUDA 11 typically uses `libnvrtc.so.11.2` (and may also provide a
-    // `libnvrtc.so.11` symlink depending on the packaging).
-    "libnvrtc.so.11.2",
-    "libnvrtc.so.11.1",
-    "libnvrtc.so.11.0",
-    "libnvrtc.so.11",
-    // Unversioned name typically only exists with development packages, but try
-    // it as a last resort.
-    "libnvrtc.so",
-};
-
 void *TryLoadLibNvrtc() {
-  // If libnvrtc is already loaded in the current process, prefer reusing that
-  // instance to avoid loading multiple NVRTC versions in one process.
-#ifdef RTLD_NOLOAD
-  for (const char *path : kLibNvrtcPaths) {
-    void *existing = dlopen(path, RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
-    if (existing != nullptr) {
-      return existing;
-    }
+  // First, check if the symbols are already available globally.
+  // This handles cases where PyTorch or another library has already loaded
+  // libnvrtc.
+  // We use a representative symbol like nvrtcVersion.
+  void *sym = dlsym(RTLD_DEFAULT, "nvrtcVersion");
+  if (sym != nullptr && sym != reinterpret_cast<void *>(&nvrtcVersion)) {
+    return RTLD_DEFAULT;
   }
-#endif
+  sym = dlsym(RTLD_NEXT, "nvrtcVersion");
+  if (sym != nullptr) {
+    return RTLD_NEXT;
+  }
 
-  void *handle = nullptr;
-  for (const char *path : kLibNvrtcPaths) {
-    handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
-    if (handle != nullptr) {
-      break;
-    }
-  }
-  return handle;
+  fprintf(stderr,
+          "TileLang Error: libnvrtc symbols not found globally. "
+          "Make sure PyTorch with CUDA is installed before using TileLang.\n");
+  abort();
 }
 
 template <typename T> T GetSymbol(void *handle, const char *name) {
@@ -100,10 +89,6 @@ void *GetLibNvrtcHandle() {
 NVRTCAPI CreateNVRTCAPI() {
   NVRTCAPI api{};
   void *handle = GetLibNvrtcHandle();
-  if (handle == nullptr) {
-    return api;
-  }
-
 #define LOOKUP_REQUIRED(name)                                                  \
   api.name##_ = GetSymbol<decltype(api.name##_)>(handle, #name);               \
   if (api.name##_ == nullptr) {                                                \
