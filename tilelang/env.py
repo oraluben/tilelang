@@ -70,49 +70,48 @@ def _is_running_autodd() -> bool:
 def _find_cuda_home() -> str:
     """Find the CUDA install path.
 
+    Resolution order (pip-installed nvcc is preferred over system nvcc):
+
+    1. ``CUDA_HOME`` / ``CUDA_PATH`` environment variable.
+    2. pip-installed ``nvidia-cuda-nvcc`` package.
+    3. ``nvcc`` found on the system ``PATH``.
+    4. Well-known system paths (``/usr/local/cuda``, HPC SDK, etc.).
+
     Adapted from https://github.com/pytorch/pytorch/blob/main/torch/utils/cpp_extension.py
     """
-    # Guess #1
+    # 1. Explicit env var
     cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
     if cuda_home is None:
-        # Guess #2
-        nvcc_path = shutil.which("nvcc")
-        if nvcc_path is not None:
-            # Standard CUDA pattern
-            if "cuda" in nvcc_path.lower():
-                cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
-            # NVIDIA HPC SDK pattern
-            elif "hpc_sdk" in nvcc_path.lower():
-                # Navigate to the root directory of nvhpc
-                cuda_home = os.path.dirname(os.path.dirname(os.path.dirname(nvcc_path)))
-            # Generic fallback for non-standard or symlinked installs
-            else:
-                cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
-
-        elif _get_package_version("nvidia-cuda-nvcc") is not None:
-            # Guess #3
-            # from pypi package nvidia-cuda-nvcc, only nvidia-cuda-nvcc>=13.0 works.
-            # nvidia-cuda-nvcc-cu12, etc. only installs `ptxas`, not `nvcc`
+        # 2. pip-installed nvidia-cuda-nvcc (preferred over system nvcc)
+        if _get_package_version("nvidia-cuda-nvcc") is not None:
             for file in importlib.metadata.files("nvidia-cuda-nvcc") or []:
                 if file.name == "nvcc" or file.name == "nvcc.exe":
                     cuda_home = str(pathlib.Path(file.locate()).parent.parent)
                     break
-            else:
-                raise AssertionError("`nvidia-cuda-nvcc` installed but no `nvcc` found")
 
-        else:
-            # Guess #4
+        # 3. System nvcc on PATH
+        if cuda_home is None:
+            nvcc_path = shutil.which("nvcc")
+            if nvcc_path is not None:
+                if "cuda" in nvcc_path.lower():
+                    cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
+                elif "hpc_sdk" in nvcc_path.lower():
+                    cuda_home = os.path.dirname(os.path.dirname(os.path.dirname(nvcc_path)))
+                else:
+                    cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
+
+        # 4. Well-known system paths
+        if cuda_home is None:
             if sys.platform == "win32":
                 cuda_homes = glob.glob("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*")
                 cuda_home = "" if len(cuda_homes) == 0 else cuda_homes[0]
             else:
-                # Linux/macOS
                 if os.path.exists("/usr/local/cuda"):
                     cuda_home = "/usr/local/cuda"
                 elif os.path.exists("/opt/nvidia/hpc_sdk/Linux_x86_64"):
                     cuda_home = "/opt/nvidia/hpc_sdk/Linux_x86_64"
 
-        # Validate found path
+        # Validate
         if cuda_home is None or not os.path.exists(cuda_home):
             cuda_home = None
 

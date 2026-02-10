@@ -142,19 +142,19 @@ def _default_cuda_arch_from_nvcc() -> str:
 def _infer_cuda_arch() -> str | None:
     """Infer the CUDA architecture string (e.g. ``"sm_90a"``).
 
-    Resolution order:
-      1. ``torch.cuda.get_device_capability`` (real GPU present)
-      2. ``_default_cuda_arch_from_nvcc``      (nvcc available, no GPU)
+    Resolution order (runtime before compiler):
+      1. GPU runtime – ``torch.cuda.get_device_capability`` (real GPU present)
+      2. NVCC compiler – ``_default_cuda_arch_from_nvcc`` (pip or system nvcc)
 
     Returns ``None`` when neither source is available.
     """
-    # 1. torch knows the device capability
+    # 1. GPU runtime: torch knows the device capability
     if torch.cuda.is_available():
         cap = torch.cuda.get_device_capability(0)
         if cap:
             return f"sm_{nvcc.get_target_arch(cap)}"
 
-    # 2. nvcc is available – pick a default based on toolkit version
+    # 2. NVCC compiler available (pip-installed or system)
     if check_cuda_availability():
         return f"sm_{_default_cuda_arch_from_nvcc()}"
 
@@ -168,8 +168,9 @@ def determine_target(target: str | Target | Literal["auto"] = "auto", return_obj
     The CUDA architecture is resolved as follows:
 
     1. If the caller explicitly specifies ``-arch=sm_XX``, use it.
-    2. Else if ``torch`` can report the device capability, use that.
-    3. Else if nvcc is available, derive a default from the toolkit version.
+    2. Else if ``torch`` reports a GPU device capability (runtime), use that.
+    3. Else if nvcc is available (pip-installed or system), derive a default
+       from the toolkit version.
     4. Otherwise fall back to TVM's built-in default.
 
     Args:
@@ -188,18 +189,14 @@ def determine_target(target: str | Target | Literal["auto"] = "auto", return_obj
         if target is not None:
             return target
 
-        # Check for CUDA and HIP availability
-        is_cuda_available = check_cuda_availability()
-        is_hip_available = check_hip_availability()
-
-        if is_cuda_available:
-            arch = _infer_cuda_arch()
-            if arch is not None:
-                return_var = Target({"kind": "cuda", "arch": arch})
-            else:
-                return_var = "cuda"
-
-        elif is_hip_available:
+        # Auto-detection: first check runtime (torch), then compiler (nvcc).
+        # _infer_cuda_arch() follows this order internally:
+        #   1. torch.cuda (GPU runtime available)
+        #   2. nvcc (pip-installed or system compiler)
+        arch = _infer_cuda_arch()
+        if arch is not None:
+            return_var = Target({"kind": "cuda", "arch": arch})
+        elif check_hip_availability():
             return_var = "hip"
         elif check_metal_availability():
             return_var = "metal"
