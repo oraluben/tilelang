@@ -121,6 +121,12 @@ class PassConfigKey(str, Enum):
     TL_DISABLE_LOOP_UNSWITCHING = "tl.disable_loop_unswitching"
     """Disable loop unswitching optimization. Default: False"""
 
+    TL_LOOP_UNSWITCHING_ALLOW_NON_TRIVIAL_ELSE = "tl.loop_unswitching_allow_non_trivial_else"
+    """Allow loop unswitching even when the else-version of the loop body has side effects.
+
+    This is more aggressive and may increase code size. Default: False.
+    """
+
     TL_DISABLE_THREAD_STORAGE_SYNC = "tl.disable_thread_storage_sync"
     """Disable thread storage synchronization pass. When enabled, disables the
     automatic insertion of thread synchronization barriers (e.g., __syncthreads())
@@ -216,3 +222,6 @@ class PassConfigKey(str, Enum):
 
     CUDA_KERNELS_OUTPUT_DIR = "cuda.kernels_output_dir"
     """Output directory for generated CUDA kernels. Default: empty string"""
+
+    TL_DISABLE_OUT_OF_BOUND_WARNING = "tl.disable_out_of_bound_warning"
+    """Disable out-of-bound access warnings in safe memory access legalization. Default: False"""
