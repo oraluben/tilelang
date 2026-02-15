@@ -81,6 +81,6 @@ if __name__ == "__main__":
     # torch_add()
     # print(benchmark(torch_add, n=100))
 
-    jit_kernel = matmul(m, n, k, 16, 16, 16, dtype=dtype, accum_dtype="float")
+    jit_kernel = tilelang.compile(matmul(m, n, k, 16, 16, 16, dtype=dtype, accum_dtype="float"), target="mps")
 
-    jit_kernel(a, b, c)
+    # jit_kernel(a, b, c)
