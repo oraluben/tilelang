@@ -37,7 +37,7 @@ def matmul(M, N, K, block_M, block_N, block_K, dtype=T.float32, accum_dtype=T.fl
     return main
 
 
-def matmul_gemm(M, N, K, block_M, block_N, block_K, dtype=T.float32, accum_dtype=T.float32):
+def matmul_with_gemm(M, N, K, block_M, block_N, block_K, dtype=T.float32, accum_dtype=T.float32):
     """GEMM kernel using T.gemm (gemm_v2 path with Metal simdgroup layout)."""
 
     @T.prim_func
@@ -92,7 +92,7 @@ def assert_metal_gemm_codegen(
     dtype=T.float32,
     accum_dtype=T.float32,
 ):
-    func = matmul_gemm(M, N, K, block_M, block_N, block_K, dtype=dtype, accum_dtype=accum_dtype)
+    func = matmul_with_gemm(M, N, K, block_M, block_N, block_K, dtype=dtype, accum_dtype=accum_dtype)
     with tvm.transform.PassContext(), tvm.target.Target("metal"):
         artifact = tilelang.lower(func, target="metal")
 

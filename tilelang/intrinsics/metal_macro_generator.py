@@ -212,8 +212,8 @@ class MetalSimdgroupIntrinEmitter:
         shape = local_buf.shape
         assert is_fragment(local_buf), f"local_buf {local_buf} must be a fragment, but got {local_buf.scope()}"
 
-        # Forward map: (row, col) -> (thread_id, local_id)
-        forward_layout = IndexMap.from_func(shared_8x8_to_mma_a_32x2_layout, index_dtype=T.int32)
+        # Forward map: (row, col) -> (thread_id, local_id) for 8x8 simdgroup tile
+        shared_to_fragment_layout = IndexMap.from_func(shared_8x8_to_mma_a_32x2_layout, index_dtype=T.int32)
 
         micro_size_x, micro_size_y = self.micro_size_x, self.micro_size_y
         local_size_out = self.local_size_out
@@ -225,7 +225,7 @@ class MetalSimdgroupIntrinEmitter:
         def forward_thread(i: int, j: int) -> int:
             block_i, block_j = (i // micro_size_x) // warp_rows, (j // micro_size_y) // warp_cols
             mma_i, mma_j = i % micro_size_x, j % micro_size_y
-            lane_id, _ = forward_layout.map_indices([mma_i, mma_j])
+            lane_id, _ = shared_to_fragment_layout.map_indices([mma_i, mma_j])
             if is_m_first:
                 thread_id = block_i * (block_col_warps * warp_size) + block_j * warp_size + lane_id
             else:
@@ -235,7 +235,7 @@ class MetalSimdgroupIntrinEmitter:
         def forward_index(i: int, j: int) -> int:
             warp_i, warp_j = (i // micro_size_x) % warp_rows, (j // micro_size_y) % warp_cols
             mma_i, mma_j = i % micro_size_x, j % micro_size_y
-            _, local_id = forward_layout.map_indices([mma_i, mma_j])
+            _, local_id = shared_to_fragment_layout.map_indices([mma_i, mma_j])
             return warp_i * (warp_cols * local_size_out) + warp_j * local_size_out + local_id
 
         return T.Fragment(
