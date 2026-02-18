@@ -198,7 +198,21 @@ if(NOT TILELANG_BACKEND_USER_SELECTED)
   endif()
 endif()
 
-if(USE_METAL)
+# On non-Apple platforms USE_METAL=ON enables only codegen (Metal source
+# generation) without requiring the Metal/Foundation frameworks.  TVM's
+# Metal.cmake would fail to find these frameworks on Linux, so we disable
+# USE_METAL for TVM while keeping it enabled for TileLang.  The TVM build
+# will compile codegen_metal.cc (always in COMPILER_SRCS) and use the
+# build_metal_off.cc stub for MetalModuleCreate, which wraps generated
+# source into a source module -- exactly what we need for cross-compilation.
+if(USE_METAL AND NOT APPLE)
+  message(STATUS "Metal backend on non-Apple: enabling codegen-only mode (no Metal runtime)")
+  set(USE_METAL OFF CACHE STRING "${TILELANG_BACKEND_DOC_METAL}" FORCE)
+  set(USE_METAL OFF)
+  set(TILELANG_METAL_CODEGEN_ONLY ON)
+endif()
+
+if(USE_METAL OR TILELANG_METAL_CODEGEN_ONLY)
   file(GLOB TILE_LANG_METAL_SRCS
     src/target/rt_mod_metal.cc
   )
