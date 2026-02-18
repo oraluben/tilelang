@@ -90,8 +90,6 @@ class GemmMetal(GemmBase):
         num_simd_c = warp_rows * warp_cols
         block_K = mps_emitter.chunk
         micro_size_k = mps_emitter.micro_size_k
-        micro_size_x = mps_emitter.micro_size_x
-        micro_size_y = mps_emitter.micro_size_y
 
         M = int(self.M)
         N = int(self.N)
@@ -116,18 +114,18 @@ class GemmMetal(GemmBase):
                 A_local = T.alloc_local((warp_rows * 64), in_dtype, scope="metal.simdgroup")
                 B_local = T.alloc_local((warp_cols * 64), in_dtype, scope="metal.simdgroup")
                 C_simd = T.alloc_local((num_simd_c * 64), accum_dtype, scope="metal.simdgroup")
-                C_scratch = T.alloc_shared((M, N), accum_dtype, scope="shared")
+                C_shared = T.alloc_shared((M, N), accum_dtype, scope="shared")
                 if clear_accum:
                     for _i in T.serial(num_simd_c):
                         T.make_filled_simdgroup_matrix(
                             C_simd.data, _i, T.cast(0, accum_dtype))
                 else:
-                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_scratch)
+                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_shared)
                 for ki in T.serial(0, (block_K // micro_size_k)):
                     mps_emitter.ldmatrix_a(A_local, A_region, ki)
                     mps_emitter.ldmatrix_b(B_local, B_region, ki)
                     mps_emitter.mma(A_local, B_local, C_simd, ki)
-                mps_emitter.simd_to_fragment(C_simd, C_buf, C_scratch)
+                mps_emitter.simd_to_fragment(C_simd, C_buf, C_shared)
 
             return _Simplify(_gemm_ssr, inline_let=True)
         elif self.is_gemm_sr():
@@ -137,17 +135,17 @@ class GemmMetal(GemmBase):
             def _gemm_srr() -> None:
                 A_local = T.alloc_local((warp_rows * 64), in_dtype, scope="metal.simdgroup")
                 C_simd = T.alloc_local((num_simd_c * 64), accum_dtype, scope="metal.simdgroup")
-                C_scratch = T.alloc_shared((M, N), accum_dtype, scope="shared")
+                C_shared = T.alloc_shared((M, N), accum_dtype, scope="shared")
                 if clear_accum:
                     for _i in T.serial(num_simd_c):
                         T.make_filled_simdgroup_matrix(
                             C_simd.data, _i, T.cast(0, accum_dtype))
                 else:
-                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_scratch)
+                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_shared)
                 for ki in T.serial(0, (block_K // micro_size_k)):
                     mps_emitter.ldmatrix_a(A_local, A_region, ki)
                     mps_emitter.mma(A_local, B_buf, C_simd, ki)
-                mps_emitter.simd_to_fragment(C_simd, C_buf, C_scratch)
+                mps_emitter.simd_to_fragment(C_simd, C_buf, C_shared)
 
             return _Simplify(_gemm_srr, inline_let=True)
         elif self.is_gemm_rs():
@@ -157,17 +155,17 @@ class GemmMetal(GemmBase):
             def _gemm_rsr() -> None:
                 B_local = T.alloc_local((warp_cols * 64), in_dtype, scope="metal.simdgroup")
                 C_simd = T.alloc_local((num_simd_c * 64), accum_dtype, scope="metal.simdgroup")
-                C_scratch = T.alloc_shared((M, N), accum_dtype, scope="shared")
+                C_shared = T.alloc_shared((M, N), accum_dtype, scope="shared")
                 if clear_accum:
                     for _i in T.serial(num_simd_c):
                         T.make_filled_simdgroup_matrix(
                             C_simd.data, _i, T.cast(0, accum_dtype))
                 else:
-                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_scratch)
+                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_shared)
                 for ki in T.serial(0, (block_K // micro_size_k)):
                     mps_emitter.ldmatrix_b(B_local, B_region, ki)
                     mps_emitter.mma(A_buf, B_local, C_simd, ki)
-                mps_emitter.simd_to_fragment(C_simd, C_buf, C_scratch)
+                mps_emitter.simd_to_fragment(C_simd, C_buf, C_shared)
 
             return _Simplify(_gemm_rsr, inline_let=True)
         elif self.is_gemm_rr():
@@ -177,16 +175,16 @@ class GemmMetal(GemmBase):
             @T.prim_func
             def _gemm_rrr() -> None:
                 C_simd = T.alloc_local((num_simd_c * 64), accum_dtype, scope="metal.simdgroup")
-                C_scratch = T.alloc_shared((M, N), accum_dtype, scope="shared")
+                C_shared = T.alloc_shared((M, N), accum_dtype, scope="shared")
                 if clear_accum:
                     for _i in T.serial(num_simd_c):
                         T.make_filled_simdgroup_matrix(
                             C_simd.data, _i, T.cast(0, accum_dtype))
                 else:
-                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_scratch)
+                    mps_emitter.fragment_to_simd(C_buf, C_simd, C_shared)
                 for ki in T.serial(0, (block_K // micro_size_k)):
                     mps_emitter.mma(A_buf, B_buf, C_simd, ki)
-                mps_emitter.simd_to_fragment(C_simd, C_buf, C_scratch)
+                mps_emitter.simd_to_fragment(C_simd, C_buf, C_shared)
 
             return _Simplify(_gemm_rrr, inline_let=True)
         else:
