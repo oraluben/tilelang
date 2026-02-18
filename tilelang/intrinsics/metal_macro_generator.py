@@ -184,7 +184,7 @@ class MPSIntrinEmitter:
         warp_rows = self.warp_rows
         warp_cols = self.warp_cols
         warp_size = self.WARP_SIZE
-        local_size = 2  # 64 / 32 = 2 elements per thread per 8x8 tile
+        local_size = (micro_size_x * micro_size_y) // self.WARP_SIZE
 
         def forward_thread(i: int, j: int) -> int:
             # Determine which warp (block_i, block_j) and which tile within the warp
