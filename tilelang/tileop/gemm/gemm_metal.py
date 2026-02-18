@@ -4,8 +4,7 @@ from tilelang.layout import make_swizzled_layout
 from tilelang.intrinsics.metal_macro_generator import (
     MetalSimdgroupIntrinEmitter,
 )
-from tilelang.utils.language import is_shared, is_fragment, is_full_region
-from tilelang import tvm as tvm
+from tilelang.utils.language import is_full_region
 from tvm.target import Target
 from tvm.ir import Range
 from tvm import tir

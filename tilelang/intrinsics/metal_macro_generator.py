@@ -1,17 +1,10 @@
 from __future__ import annotations
 import tilelang.language as T
-from typing import Literal
 from tvm import tir
 from tvm.ir import Range
 from tvm.tir import PrimExpr, IndexMap, Buffer, Var, BufferRegion, BufferLoad
-from tvm.runtime import convert
 from tilelang.utils import is_fragment
 from tilelang.language.utils import get_buffer_region_from_load
-from .mma_metal_layout import (
-    shared_8x8_to_mma_a_32x2_layout,
-)
-
-lift = convert
 
 
 def metal_store_index_map(thread_id, local_id):
@@ -153,8 +146,6 @@ class MetalSimdgroupIntrinEmitter:
         block_K = self.chunk
         a_transposed = self.a_transposed
         b_transposed = self.b_transposed
-        in_dtype = self.a_dtype
-        accum_dtype = self.accum_dtype
 
         thread_binding = self.get_thread_binding()
 
@@ -192,7 +183,7 @@ class MetalSimdgroupIntrinEmitter:
                                 b_val = B_buf[B_base0 + k_idx, B_base1 + b_col]
 
                             C_buf[i * warp_cols * local_size_out + j * local_size_out + local_id] += (
-                                T.Cast(accum_dtype, a_val) * T.Cast(accum_dtype, b_val)
+                                a_val * b_val
                             )
 
         return _gemm_ss_impl(C_buf, thread_binding)
