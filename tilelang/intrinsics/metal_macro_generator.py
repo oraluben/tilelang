@@ -172,8 +172,47 @@ class MPSIntrinEmitter:
         return _warp_mma(A_local_buf, B_local_buf, C_local_buf)
 
     def make_mma_store_layout(self, buffer):
-        from tilelang.intrinsics.mma_metal_layout import metal_store_fragment
-        return metal_store_fragment
+        from tilelang.intrinsics.mma_metal_layout import metal_store_layout
+        from tilelang.utils import is_fragment
+
+        shape = buffer.shape
+
+        micro_size_x = self.micro_size_x
+        micro_size_y = self.micro_size_y
+        block_row_warps = self.block_row_warps
+        block_col_warps = self.block_col_warps
+        warp_rows = self.warp_rows
+        warp_cols = self.warp_cols
+        warp_size = self.WARP_SIZE
+        local_size = 2  # 64 / 32 = 2 elements per thread per 8x8 tile
+
+        def forward_thread(i: int, j: int) -> int:
+            # Determine which warp (block_i, block_j) and which tile within the warp
+            block_i = (i // micro_size_x) // warp_rows
+            block_j = (j // micro_size_y) // warp_cols
+            # Position within the 8x8 tile
+            mma_i = i % micro_size_x
+            mma_j = j % micro_size_y
+            lane_id, _ = metal_store_layout.map_indices([mma_i, mma_j])
+            # Thread binding: [warp_size, block_row_warps, block_col_warps]
+            thread_id = block_j * (block_row_warps * warp_size) + block_i * warp_size + lane_id
+            return thread_id
+
+        def forward_index(i: int, j: int) -> int:
+            # Which tile within the warp
+            warp_i = (i // micro_size_x) % warp_rows
+            warp_j = (j // micro_size_y) % warp_cols
+            # Position within the 8x8 tile
+            mma_i = i % micro_size_x
+            mma_j = j % micro_size_y
+            _, local_id = metal_store_layout.map_indices([mma_i, mma_j])
+            return warp_i * (warp_cols * local_size) + warp_j * local_size + local_id
+
+        return T.Fragment(
+            shape,
+            forward_thread_fn=forward_thread,
+            forward_index_fn=forward_index,
+        )
 
     def stmatrix_c(self, C_local_buf, C_shared_buf):
         warp_rows = self.warp_rows
