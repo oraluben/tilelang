@@ -207,6 +207,8 @@ endif()
 # source into a source module -- exactly what we need for cross-compilation.
 if(USE_METAL AND NOT APPLE)
   message(STATUS "Metal backend on non-Apple: enabling codegen-only mode (no Metal runtime)")
+  # Update both the cache entry (for TVM's subdirectory) and the normal
+  # variable (which shadows the cache in the current scope).
   set(USE_METAL OFF CACHE STRING "${TILELANG_BACKEND_DOC_METAL}" FORCE)
   set(USE_METAL OFF)
   set(TILELANG_METAL_CODEGEN_ONLY ON)

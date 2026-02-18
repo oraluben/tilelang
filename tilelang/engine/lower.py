@@ -145,6 +145,19 @@ def canon_target_host(target: str | Target, target_host: str | Target | None):
 
 
 def host_codegen(host_mod: tvm.IRModule, target_host: Target, target: Target | None = None) -> tvm.IRModule:
+    """Generate host-side code from the lowered IR module.
+
+    Parameters
+    ----------
+    host_mod : tvm.IRModule
+        The host-side IR module to compile.
+    target_host : Target
+        The host compilation target (e.g. "llvm" or "c").
+    target : Target, optional
+        The device target.  When the device target is Metal, the pass
+        MarkHostMetalContext is applied so that the generated host code
+        contains the Metal/MPS synchronisation logic.
+    """
     host_mod = tir.transform.BindTarget(target_host)(host_mod)
     host_mod = tir.transform.FP8StorageLegalize()(host_mod)
     host_mod = tir.transform.BF16StorageLegalize()(host_mod)
