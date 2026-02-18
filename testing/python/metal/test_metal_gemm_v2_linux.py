@@ -73,4 +73,3 @@ def test_metal_gemm_v2_larger():
 
 if __name__ == "__main__":
     tilelang.testing.main()
-
