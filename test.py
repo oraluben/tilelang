@@ -18,7 +18,7 @@ def _p(code, target):
     return code
 
 
-@tilelang.jit
+@tilelang.jit(execution_backend="torch")
 def matmul(M, N, K, block_M, block_N, block_K, dtype="float32", accum_dtype="float"):
 
     @T.prim_func
@@ -87,4 +87,6 @@ if __name__ == "__main__":
     jit_kernel = matmul(m, n, k, 16, 16, 16, dtype=dtype, accum_dtype="float")
     print("Compilation finished.", flush=True)
 
-    # jit_kernel(a, b, c)
+    # print(jit_kernel.get_kernel_source())
+    jit_kernel(a, b, c)
+    print(c)
