@@ -1,4 +1,5 @@
 import tilelang
+print("Imported tilelang")
 from tilelang import tvm as tvm
 from time import sleep
 # import tilelang.testing
@@ -6,6 +7,7 @@ import tilelang.language as T
 import json
 import torch
 import os
+print("Imports done", flush=True)
 
 
 from tilelang.engine.callback import register_metal_postproc_callback
@@ -81,6 +83,8 @@ if __name__ == "__main__":
     # torch_add()
     # print(benchmark(torch_add, n=100))
 
-    jit_kernel = tilelang.compile(matmul(m, n, k, 16, 16, 16, dtype=dtype, accum_dtype="float"), target="mps")
+    print("Starting compilation...", flush=True)
+    jit_kernel = matmul(m, n, k, 16, 16, 16, dtype=dtype, accum_dtype="float")
+    print("Compilation finished.", flush=True)
 
     # jit_kernel(a, b, c)

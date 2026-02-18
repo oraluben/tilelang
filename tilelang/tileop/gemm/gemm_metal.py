@@ -11,10 +11,13 @@ from tilelang.layout import make_swizzled_layout
 
 class GemmMetal(GemmBase):
     def infer_layout(self, target: Target, thread_nums: int):
+
+        from tilelang.intrinsics.mma_metal_layout import metal_store_fragment
+
         return {
             self.A: make_swizzled_layout(self.A),
             self.B: make_swizzled_layout(self.B),
-            self.C: make_swizzled_layout(self.C),
+            self.C: metal_store_fragment,
         }
 
     def lower(self, layout_map: dict, target: Target, thread_nums: int, thread_var: tir.Var):
