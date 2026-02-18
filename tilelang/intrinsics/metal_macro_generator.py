@@ -5,15 +5,20 @@ from tvm.ir import Range
 from tvm.tir import PrimExpr, IndexMap, Buffer, Var, BufferRegion, BufferLoad
 from tilelang.utils import is_fragment
 from tilelang.language.utils import get_buffer_region_from_load
+from .mma_metal_layout import shared_8x8_to_mma_a_32x2_layout
 
 
 def metal_store_index_map(thread_id, local_id):
-    """Reverse mapping: (thread_id, local_id) -> (row, col) for 8x8 Metal simdgroup layout."""
-    r0 = (thread_id >> 1) & 1
-    r1 = (thread_id >> 2) & 1
-    r2 = (thread_id >> 4) & 1
-    c1 = thread_id & 1
-    c2 = (thread_id >> 3) & 1
+    """Reverse mapping: (thread_id, local_id) -> (row, col) for 8x8 Metal simdgroup layout.
+
+    Uses modular arithmetic instead of bitwise ops so that TVM's iter-map
+    analysis can parse the expression (required for IndexMap.inverse()).
+    """
+    r0 = (thread_id // 2) % 2
+    r1 = (thread_id // 4) % 2
+    r2 = (thread_id // 16) % 2
+    c1 = thread_id % 2
+    c2 = (thread_id // 8) % 2
     row = r0 + 2 * r1 + 4 * r2
     col = local_id + 2 * c1 + 4 * c2
     return row, col
@@ -156,6 +161,9 @@ class MetalSimdgroupIntrinEmitter:
         B_base0 = B_region.region[-2].min
         B_base1 = B_region.region[-1].min
 
+        # Check if C_buf is 1D (flat local buffer) or 2D (fragment buffer)
+        c_is_flat = len(C_buf.shape) == 1
+
         @T.macro
         def _gemm_ss_impl(C_buf, thread_binding):
             tx, warp_n, warp_m = self.extract_thread_binding(thread_binding)
@@ -182,18 +190,30 @@ class MetalSimdgroupIntrinEmitter:
                             else:
                                 b_val = B_buf[B_base0 + k_idx, B_base1 + b_col]
 
-                            C_buf[i * warp_cols * local_size_out + j * local_size_out + local_id] += (
-                                a_val * b_val
-                            )
+                            if c_is_flat:
+                                C_buf[i * warp_cols * local_size_out + j * local_size_out + local_id] += (
+                                    a_val * b_val
+                                )
+                            else:
+                                # 2D fragment indexing: the fragment layout maps
+                                # these coordinates to the per-thread local storage
+                                C_buf[a_row, b_col] += a_val * b_val
 
         return _gemm_ss_impl(C_buf, thread_binding)
 
     def make_metal_store_layout(self, local_buf: Buffer) -> T.Fragment:
-        """Create fragment layout for Metal simdgroup output (C matrix)."""
+        """Create fragment layout for Metal simdgroup output (C matrix).
+
+        Uses the forward map (row, col) -> (thread_id, local_id) from
+        shared_8x8_to_mma_a_32x2_layout directly, avoiding the need to
+        invert the reverse map (which uses bit-interleaving that TVM's
+        iter-map analysis cannot handle).
+        """
         shape = local_buf.shape
         assert is_fragment(local_buf), f"local_buf {local_buf} must be a fragment, but got {local_buf.scope()}"
 
-        inverse_metal_store_layout = self.get_store_index_map(inverse=True)
+        # Forward map: (row, col) -> (thread_id, local_id)
+        forward_layout = IndexMap.from_func(shared_8x8_to_mma_a_32x2_layout, index_dtype=T.int32)
 
         micro_size_x, micro_size_y = self.micro_size_x, self.micro_size_y
         local_size_out = self.local_size_out
@@ -205,7 +225,7 @@ class MetalSimdgroupIntrinEmitter:
         def forward_thread(i: int, j: int) -> int:
             block_i, block_j = (i // micro_size_x) // warp_rows, (j // micro_size_y) // warp_cols
             mma_i, mma_j = i % micro_size_x, j % micro_size_y
-            lane_id, _ = inverse_metal_store_layout.map_indices([mma_i, mma_j])
+            lane_id, _ = forward_layout.map_indices([mma_i, mma_j])
             if is_m_first:
                 thread_id = block_i * (block_col_warps * warp_size) + block_j * warp_size + lane_id
             else:
@@ -215,7 +235,7 @@ class MetalSimdgroupIntrinEmitter:
         def forward_index(i: int, j: int) -> int:
             warp_i, warp_j = (i // micro_size_x) % warp_rows, (j // micro_size_y) % warp_cols
             mma_i, mma_j = i % micro_size_x, j % micro_size_y
-            _, local_id = inverse_metal_store_layout.map_indices([mma_i, mma_j])
+            _, local_id = forward_layout.map_indices([mma_i, mma_j])
             return warp_i * (warp_cols * local_size_out) + warp_j * local_size_out + local_id
 
         return T.Fragment(
