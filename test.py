@@ -71,7 +71,7 @@ def benchmark(f, n, *args, **kwargs):
 
 
 if __name__ == "__main__":
-    m = n = k = 1024
+    m = n = k = 128
     torch_dtype = torch.float16
     dtype = 'float16'
 
@@ -84,9 +84,10 @@ if __name__ == "__main__":
     # print(benchmark(torch_add, n=100))
 
     print("Starting compilation...", flush=True)
-    jit_kernel = matmul(m, n, k, 16, 16, 16, dtype=dtype, accum_dtype="float")
+    jit_kernel = matmul(m, n, k, 8, 8, 8, dtype=dtype, accum_dtype="float")
     print("Compilation finished.", flush=True)
 
     # print(jit_kernel.get_kernel_source())
     jit_kernel(a, b, c)
     print(c)
+    print(a @ b)
