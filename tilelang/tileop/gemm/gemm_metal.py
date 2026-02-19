@@ -8,27 +8,25 @@ from tvm import tir
 from tilelang import language as T
 from tilelang.transform.simplify import _Simplify
 
-from tilelang.layout import make_swizzled_layout
 
-
-def _is_shared_like(buffer) -> bool:
-    """Check if a buffer is shared-like (shared memory or metal.simdgroup)."""
-    return is_shared(buffer) or is_metal_simdgroup(buffer)
+def _is_register_like(buffer) -> bool:
+    """Check if a buffer is register-like (fragment or metal.simdgroup)."""
+    return is_fragment(buffer) or is_metal_simdgroup(buffer)
 
 
 class GemmMetal(GemmBase):
 
     def is_gemm_ss(self) -> bool:
-        return _is_shared_like(self.A) and _is_shared_like(self.B)
+        return is_shared(self.A) and is_shared(self.B)
 
     def is_gemm_sr(self) -> bool:
-        return _is_shared_like(self.A) and is_fragment(self.B)
+        return is_shared(self.A) and _is_register_like(self.B)
 
     def is_gemm_rs(self) -> bool:
-        return is_fragment(self.A) and _is_shared_like(self.B)
+        return _is_register_like(self.A) and is_shared(self.B)
 
     def is_gemm_rr(self) -> bool:
-        return is_fragment(self.A) and is_fragment(self.B)
+        return _is_register_like(self.A) and _is_register_like(self.B)
 
     def infer_layout(self, target: Target, thread_nums: int):
         m_warp, n_warp = self.policy.compute_warp_partition(
@@ -53,20 +51,16 @@ class GemmMetal(GemmBase):
 
         if self.is_gemm_ss():
             return {
-                self.A: make_swizzled_layout(self.A, allow_pad=False),
-                self.B: make_swizzled_layout(self.B, allow_pad=False),
                 self.C: mps_emitter.make_mma_store_layout(self.C),
             }
         elif self.is_gemm_sr():
             return {
-                self.A: make_swizzled_layout(self.A, allow_pad=False),
                 self.B: mps_emitter.make_mma_store_layout(self.B),
                 self.C: mps_emitter.make_mma_store_layout(self.C),
             }
         elif self.is_gemm_rs():
             return {
                 self.A: mps_emitter.make_mma_store_layout(self.A),
-                self.B: make_swizzled_layout(self.B, allow_pad=False),
                 self.C: mps_emitter.make_mma_store_layout(self.C),
             }
         elif self.is_gemm_rr():

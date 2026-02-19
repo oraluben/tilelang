@@ -237,8 +237,8 @@ class MPSIntrinEmitter:
         @T.macro
         def _warp_stmatrix_c(C_local_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n):
             for i, j in T.grid(warp_rows, warp_cols):
-                row_in_block = warp_m * (self.warp_row_tiles * self.micro_size_x) + i * self.micro_size_x
-                col_in_block = warp_n * (self.warp_col_tiles * self.micro_size_y) + j * self.micro_size_y
+                row_in_block = warp_m * self.warp_row_tiles + i * micro_size_x
+                col_in_block = warp_n * self.warp_col_tiles + j * micro_size_y
                 
                 row_idx = row_in_block + offset_m
                 col_idx = col_in_block + offset_n
@@ -282,8 +282,8 @@ class MPSIntrinEmitter:
         @T.macro
         def _warp_ldmatrix_c(C_local_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n):
             for i, j in T.grid(warp_rows, warp_cols):
-                row_in_block = warp_m * (self.warp_row_tiles * self.micro_size_x) + i * self.micro_size_x
-                col_in_block = warp_n * (self.warp_col_tiles * self.micro_size_y) + j * self.micro_size_y
+                row_in_block = warp_m * self.warp_row_tiles + i * micro_size_x
+                col_in_block = warp_n * self.warp_col_tiles + j * micro_size_y
                 
                 row_idx = row_in_block + offset_m
                 col_idx = col_in_block + offset_n
