@@ -71,5 +71,12 @@ def test_metal_gemm_v2_larger():
     assert_metal_gemm_v2_codegen(128, 128, 128, 32, 32, 32, dtype=T.float16)
 
 
+def test_metal_gemm_v2_small_blocks():
+    """Test with blocks where warp_rows > 1 and warp_cols > 1, which previously
+    produced incorrect results due to swizzle padding changing the stride.
+    """
+    assert_metal_gemm_v2_codegen(16, 16, 16, 16, 16, 16, dtype=T.float16)
+
+
 if __name__ == "__main__":
     tilelang.testing.main()

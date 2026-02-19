@@ -53,20 +53,20 @@ class GemmMetal(GemmBase):
 
         if self.is_gemm_ss():
             return {
-                self.A: make_swizzled_layout(self.A),
-                self.B: make_swizzled_layout(self.B),
+                self.A: make_swizzled_layout(self.A, allow_pad=False),
+                self.B: make_swizzled_layout(self.B, allow_pad=False),
                 self.C: mps_emitter.make_mma_store_layout(self.C),
             }
         elif self.is_gemm_sr():
             return {
-                self.A: make_swizzled_layout(self.A),
+                self.A: make_swizzled_layout(self.A, allow_pad=False),
                 self.B: mps_emitter.make_mma_store_layout(self.B),
                 self.C: mps_emitter.make_mma_store_layout(self.C),
             }
         elif self.is_gemm_rs():
             return {
                 self.A: mps_emitter.make_mma_store_layout(self.A),
-                self.B: make_swizzled_layout(self.B),
+                self.B: make_swizzled_layout(self.B, allow_pad=False),
                 self.C: mps_emitter.make_mma_store_layout(self.C),
             }
         elif self.is_gemm_rr():
