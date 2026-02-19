@@ -1,52 +1,54 @@
-Fix EXC_BAD_ACCESS crash in TVMFFIEnvModLookupFromImports
+Fix EXC_BAD_ACCESS crash in TVMFFIEnvModLookupFromImports on macOS
 
-The crash occurs when generated Metal code calls TVMBackendGetFuncFromEnv
-to look up "gemm_kernel" but the function is not found. The
-TVM_FFI_THROW(RuntimeError) at line 89 of module_internal.h throws an
-exception, but during exception cleanup, the error object is accessed
-after being freed (use-after-free), causing EXC_BAD_ACCESS at address
-0x6c616e7265746e49 (ASCII "Internal").
+Root cause: LookupFromImports (module_internal.h line 88-90) throws a
+C++ exception via TVM_FFI_THROW(RuntimeError) when a function is not
+found. TVM_FFI_SAFE_CALL_END catches it and calls SetSafeCallRaised to
+save the error to thread-local storage. However, when the exception
+object is destroyed after the catch block, its Deleter_ function (in
+libtvm_ffi_testing.dylib) accesses corrupted memory, causing:
+  EXC_BAD_ACCESS at address 0x6c616e7265746e49 (ASCII "Internal")
 
-The backtrace shows:
-  frame #12: TVMBackendGetFuncFromEnv ... func_name="gemm_kernel"
-  frame #11: TVMFFIEnvModLookupFromImports (returns error)
-  frame #10: __cxa_decrement_exception_refcount (exception cleanup)
-  frame #9-7: InternalError::~InternalError / Error::~Error
-  frame #3-2: Object::DecRef -> SimpleObjAllocator::Handler::Deleter_
-  frame #0: CRASH - reading freed memory containing "Internal" string
+The crash backtrace shows the Deleter_ is called across shared library
+boundaries (libtvm_ffi_testing.dylib allocates, libtvm.dylib destroys).
 
-Root cause: The error object (InternalError) allocated by
-SimpleObjAllocator is being double-freed or accessed after free during
-exception propagation across the libtvm_ffi <-> libtvm shared library
-boundary. The ErrorObjFromStd handler's Deleter_ is called on a
-corrupted/freed object.
+Fix: In LookupFromImports, instead of throwing a C++ exception, return
+nullptr. The caller (TVMFFIEnvModLookupFromImports in module.cc) then
+sets the error via TVMFFIErrorSetRaisedFromCStr which doesn't involve
+cross-library exception propagation.
 
-Proposed fix: The issue is in the exception handling across shared
-library boundaries. The TVM_FFI_SAFE_CALL_BEGIN/END macros in
-TVMFFIEnvModLookupFromImports catch C++ exceptions and convert them to
-error codes, but the exception object lifetime management fails when
-the exception is thrown from one shared library (libtvm_ffi) and caught
-in another.
-
-The fix should ensure the error string is copied before the exception
-object is destroyed, or use a thread-local error storage that doesn't
-depend on exception object lifetime.
-
---- a/3rdparty/tvm-ffi/src/ffi/extra/module_internal.h
-+++ b/3rdparty/tvm-ffi/src/ffi/extra/module_internal.h
-@@ -85,7 +85,13 @@
+--- a/3rdparty/tvm/3rdparty/tvm-ffi/src/ffi/extra/module_internal.h
++++ b/3rdparty/tvm/3rdparty/tvm-ffi/src/ffi/extra/module_internal.h
+@@ -85,9 +85,8 @@
        return tvm::ffi::Function::GetGlobal(s_name);
      }();
      if (!opt_func.has_value()) {
 -      TVM_FFI_THROW(RuntimeError) << "Cannot find function " << name
-+      // Build the error message as a std::string first to avoid
-+      // lifetime issues when the exception propagates across shared
-+      // library boundaries (libtvm_ffi <-> libtvm).
-+      std::ostringstream oss;
-+      oss << "Cannot find function " << name
-                                    << " in the imported modules or global registry.";
-+      std::string msg = oss.str();
-+      TVM_FFI_THROW(RuntimeError) << msg;
+-                                  << " in the imported modules or global registry.";
++      return nullptr;
      }
      module->import_lookup_cache_.Set(s_name, *opt_func);
      return const_cast<FunctionObj*>((*opt_func).operator->());
+   }
+
+--- a/3rdparty/tvm/3rdparty/tvm-ffi/src/ffi/extra/module.cc
++++ b/3rdparty/tvm/3rdparty/tvm-ffi/src/ffi/extra/module.cc
+@@ -169,9 +169,17 @@
+ int TVMFFIEnvModLookupFromImports(TVMFFIObjectHandle library_ctx, const char* func_name,
+                                   TVMFFIObjectHandle* out) {
+-  TVM_FFI_SAFE_CALL_BEGIN();
+-  *out = tvm::ffi::ModuleObj::InternalUnsafe::GetFunctionFromImports(
+-      reinterpret_cast<tvm::ffi::ModuleObj*>(library_ctx), func_name);
+-  TVM_FFI_SAFE_CALL_END();
++  auto* result = tvm::ffi::ModuleObj::InternalUnsafe::GetFunctionFromImports(
++      reinterpret_cast<tvm::ffi::ModuleObj*>(library_ctx), func_name);
++  if (result == nullptr) {
++    // Use C-string error API instead of throwing C++ exception to avoid
++    // cross-library exception destruction crash on macOS
++    std::string msg = std::string("Cannot find function ") + func_name +
++                      " in the imported modules or global registry.";
++    TVMFFIErrorSetRaisedFromCStr("RuntimeError", msg.c_str());
++    return -1;
++  }
++  *out = result;
++  return 0;
+ }
