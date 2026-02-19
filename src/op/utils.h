@@ -52,6 +52,11 @@ inline bool IsFragmentBuffer(const Buffer &buffer) {
   return buffer.defined() && buffer.scope() == "local.fragment";
 }
 
+// Check if a buffer is a Metal simdgroup buffer (scope == "metal.simdgroup")
+inline bool IsMetalSimdgroupBuffer(const Buffer &buffer) {
+  return buffer.defined() && buffer.scope() == "metal.simdgroup";
+}
+
 inline bool IsSharedBuffer(const Buffer &buffer, bool allow_dynamic = true) {
   if (allow_dynamic) {
     return buffer.defined() &&

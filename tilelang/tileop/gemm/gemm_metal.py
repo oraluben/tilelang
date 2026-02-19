@@ -1,6 +1,6 @@
 from .gemm_base import GemmBase
 from .inst import GemmInst
-from tilelang.utils.language import is_shared, is_fragment, is_full_region
+from tilelang.utils.language import is_shared, is_fragment, is_full_region, is_metal_simdgroup
 from tilelang import tvm as tvm
 from tvm.target import Target
 from tvm.ir import Range
@@ -11,7 +11,25 @@ from tilelang.transform.simplify import _Simplify
 from tilelang.layout import make_swizzled_layout
 
 
+def _is_shared_like(buffer) -> bool:
+    """Check if a buffer is shared-like (shared memory or metal.simdgroup)."""
+    return is_shared(buffer) or is_metal_simdgroup(buffer)
+
+
 class GemmMetal(GemmBase):
+
+    def is_gemm_ss(self) -> bool:
+        return _is_shared_like(self.A) and _is_shared_like(self.B)
+
+    def is_gemm_sr(self) -> bool:
+        return _is_shared_like(self.A) and is_fragment(self.B)
+
+    def is_gemm_rs(self) -> bool:
+        return is_fragment(self.A) and _is_shared_like(self.B)
+
+    def is_gemm_rr(self) -> bool:
+        return is_fragment(self.A) and is_fragment(self.B)
+
     def infer_layout(self, target: Target, thread_nums: int):
         m_warp, n_warp = self.policy.compute_warp_partition(
             self.M, self.N, thread_nums, target, GemmInst.METAL)

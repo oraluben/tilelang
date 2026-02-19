@@ -718,8 +718,10 @@ Stmt CopyNode::LowerNormalCopy(const LowerArgs &T,
   For vectorized_thread_loop;
   auto par_op = ParallelOp(fused_loop);
 
-  if (is_cpu_target || IsLocalBuffer(src) || IsLocalBuffer(dst)) {
-    if (IsLocalBuffer(src) && !IsLocalBuffer(dst)) {
+  if (is_cpu_target || IsLocalBuffer(src) || IsLocalBuffer(dst) ||
+      IsMetalSimdgroupBuffer(src) || IsMetalSimdgroupBuffer(dst)) {
+    if ((IsLocalBuffer(src) || IsMetalSimdgroupBuffer(src)) &&
+        !(IsLocalBuffer(dst) || IsMetalSimdgroupBuffer(dst))) {
       LOG(WARNING) << "Copy from local buffer `" << src->name << "` to "
                    << dst.scope() << " buffer `" << dst->name
                    << "` may cause conflicted write.";
