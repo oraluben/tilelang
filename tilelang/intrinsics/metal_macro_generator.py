@@ -219,9 +219,9 @@ class MPSIntrinEmitter:
         warp_cols = self.warp_cols
         micro_size_x = self.micro_size_x
         micro_size_y = self.micro_size_y
-        
+
         warp_m, warp_n = self._get_warp_indices()
-        
+
         # Handle BufferRegion or Buffer for C_shared_buf
         if hasattr(C_shared_buf, "buffer"):
             buffer = C_shared_buf.buffer
@@ -233,20 +233,20 @@ class MPSIntrinEmitter:
             offset_m = 0
             offset_n = 0
             stride = buffer.shape[-1]
-            
+
         @T.macro
         def _warp_stmatrix_c(C_local_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n):
             for i, j in T.grid(warp_rows, warp_cols):
                 row_in_block = warp_m * self.warp_row_tiles + i * micro_size_x
                 col_in_block = warp_n * self.warp_col_tiles + j * micro_size_y
-                
+
                 row_idx = row_in_block + offset_m
                 col_idx = col_in_block + offset_n
-                
+
                 index_c = i * warp_cols + j
-                
+
                 ptr = T.access_ptr(buffer[row_idx, col_idx], "w")
-                
+
                 T.simdgroup_store(
                     C_local_buf.data,
                     index_c,
@@ -256,7 +256,7 @@ class MPSIntrinEmitter:
                     micro_size_y,
                     T.bool(False)
                 )
-        
+
         return _warp_stmatrix_c(C_local_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n)
 
     def ldmatrix_c(self, C_local_buf, C_shared_buf):
@@ -264,9 +264,9 @@ class MPSIntrinEmitter:
         warp_cols = self.warp_cols
         micro_size_x = self.micro_size_x
         micro_size_y = self.micro_size_y
-        
+
         warp_m, warp_n = self._get_warp_indices()
-        
+
         # Handle BufferRegion or Buffer for C_shared_buf
         if hasattr(C_shared_buf, "buffer"):
             buffer = C_shared_buf.buffer
@@ -278,20 +278,20 @@ class MPSIntrinEmitter:
             offset_m = 0
             offset_n = 0
             stride = buffer.shape[-1]
-            
+
         @T.macro
         def _warp_ldmatrix_c(C_local_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n):
             for i, j in T.grid(warp_rows, warp_cols):
                 row_in_block = warp_m * self.warp_row_tiles + i * micro_size_x
                 col_in_block = warp_n * self.warp_col_tiles + j * micro_size_y
-                
+
                 row_idx = row_in_block + offset_m
                 col_idx = col_in_block + offset_n
-                
+
                 index_c = i * warp_cols + j
-                
+
                 ptr = T.access_ptr(buffer[row_idx, col_idx], "r")
-                
+
                 T.simdgroup_load(
                     C_local_buf.data,
                     index_c,
@@ -301,7 +301,7 @@ class MPSIntrinEmitter:
                     micro_size_y,
                     T.bool(False)
                 )
-        
+
         return _warp_ldmatrix_c(C_local_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n)
 
     def simd_to_fragment(self, C_simd_buf, C_frag_buf, C_scratch_buf):
