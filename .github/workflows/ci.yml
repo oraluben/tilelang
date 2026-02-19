@@ -70,7 +70,7 @@ jobs:
 
   tests:
     name: Test for Python ${{ matrix.python-version }} with ${{ matrix.runner.toolkit }} (on ${{ matrix.runner.name }})
-    needs: [lint]
+    # needs: [lint]
     runs-on: ${{ matrix.runner.tags }}
     strategy:
       matrix:
