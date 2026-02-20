@@ -315,7 +315,7 @@ std::pair<int, int> GemmWarpPolicyNode::computeWarpPartition(
   } else {
     ICHECK(0) << "Unknown GemmWarpPolicy";
   }
-  ICHECK(m_warp * n_warp <= num_warps)
+  ICHECK(m_warp * n_warp == num_warps)
       << "m_warp * n_warp must be at most num_warps, m_warp: " << m_warp
       << ", n_warp: " << n_warp << ", num_warps: " << num_warps;
 

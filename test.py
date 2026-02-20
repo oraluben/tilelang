@@ -12,13 +12,13 @@ print("Imports done", flush=True)
 
 from tilelang.engine.callback import register_metal_postproc_callback
 
-@register_metal_postproc_callback
-def _p(code, target):
-    print(code)
-    return code
+# @register_metal_postproc_callback
+# def _p(code, target):
+#     print(code)
+#     return code
 
 
-@tilelang.jit(execution_backend="torch")
+@tilelang.jit
 def matmul(M, N, K, block_M, block_N, block_K, dtype="float32", accum_dtype="float"):
 
     @T.prim_func
@@ -84,10 +84,10 @@ if __name__ == "__main__":
     # print(benchmark(torch_add, n=100))
 
     print("Starting compilation...", flush=True)
-    jit_kernel = matmul(m, n, k, 8, 8, 8, dtype=dtype, accum_dtype="float")
+    jit_kernel = matmul(m, n, k, 16, 16, 8, dtype=dtype, accum_dtype="float")
     print("Compilation finished.", flush=True)
 
-    # print(jit_kernel.get_kernel_source())
+    print(jit_kernel.get_kernel_source())
     jit_kernel(a, b, c)
     print(c)
     print(a @ b)
