@@ -147,7 +147,10 @@ std::pair<int, int> GemmWarpPolicyNode::computeWarpPartition(
   }
 
   int m_warp = 1, n_warp = 1;
-  constexpr int kMPerWarp = 16; // Rows processed by a single warp
+  int kMPerWarp = 16;           // Rows processed by a single warp
+  if (TargetIsMetal(target)) {
+    kMPerWarp = 8;
+  }
   int kNPerWarp = 8;            // Columns processed by a single warp
   if (TargetIsVolta(target)) {
     kNPerWarp = 16;
@@ -313,7 +316,7 @@ std::pair<int, int> GemmWarpPolicyNode::computeWarpPartition(
     ICHECK(0) << "Unknown GemmWarpPolicy";
   }
   ICHECK(m_warp * n_warp == num_warps)
-      << "m_warp * n_warp must equal num_warps, m_warp: " << m_warp
+      << "m_warp * n_warp must be at most num_warps, m_warp: " << m_warp
       << ", n_warp: " << n_warp << ", num_warps: " << num_warps;
 
   // Store the computed values in the object's member variables

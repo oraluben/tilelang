@@ -359,6 +359,7 @@ LayoutMap ParallelOpNode::InferLayout(const LayoutInferArgs &T,
           info && info.value()->rep == ReducerRepType::ALL)
         continue;
 
+      ICHECK(T.layout_map[buffer].as<Fragment>().has_value());
       auto frag = T.layout_map[buffer].as<Fragment>().value();
       bool is_fully_replicated =
           IsBufferCompletelyReplicated(buffer, T.layout_map);
