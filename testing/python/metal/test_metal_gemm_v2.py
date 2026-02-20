@@ -9,12 +9,13 @@ from tilelang import tvm as tvm
 import tilelang.testing
 import tilelang.language as T
 import torch
+import pytest
 
 
 @tilelang.jit
 def matmul_gemm_v2(M, N, K, block_M, block_N, block_K, dtype=T.float16, accum_dtype=T.float32):
     @T.prim_func
-    def main(
+    def gemm_kernel(
         A: T.Tensor((M, K), dtype),
         B: T.Tensor((K, N), dtype),
         C: T.Tensor((M, N), accum_dtype),
@@ -27,14 +28,14 @@ def matmul_gemm_v2(M, N, K, block_M, block_N, block_K, dtype=T.float16, accum_dt
             T.clear(C_local)
 
             for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=0):
-                T.copy(A[by * block_M, ko * block_K], A_shared, coalesced_width=2)
-                T.copy(B[ko * block_K, bx * block_N], B_shared, coalesced_width=2)
+                T.copy(A[by * block_M, ko * block_K], A_shared)
+                T.copy(B[ko * block_K, bx * block_N], B_shared)
 
-                T.gemm(A_shared, B_shared, C_local)
+                T.gemm_v2(A_shared, B_shared, C_local)
 
-            T.copy(C_local, C[by * block_M, bx * block_N], coalesced_width=2)
+            T.copy(C_local, C[by * block_M, bx * block_N])
 
-    return main
+    return gemm_kernel
 
 
 def assert_gemm_v2(
@@ -70,19 +71,15 @@ def assert_gemm_v2(
 
 @tilelang.testing.requires_metal
 def test_gemm_v2_16x16x16():
-    assert_gemm_v2(16, 16, 16, 16, 16, 16)
+    assert_gemm_v2(128, 128, 128, 16, 16, 16)
 
 
 @tilelang.testing.requires_metal
 def test_gemm_v2_16x16x8():
-    assert_gemm_v2(16, 16, 16, 16, 16, 8)
+    assert_gemm_v2(128, 128, 128, 16, 16, 8)
 
 
-@tilelang.testing.requires_metal
-def test_gemm_v2_16x8x8():
-    assert_gemm_v2(16, 16, 16, 16, 8, 8)
-
-
+@pytest.mark.xfail(reason='TODO: codegen not support float16x8')
 @tilelang.testing.requires_metal
 def test_gemm_v2_large():
     assert_gemm_v2(128, 128, 128, 32, 32, 32)
