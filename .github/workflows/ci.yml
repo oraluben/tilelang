@@ -70,11 +70,24 @@ jobs:
 
   tests:
     name: Test for Python ${{ matrix.python-version }} with ${{ matrix.runner.toolkit }} (on ${{ matrix.runner.name }})
-    # needs: [lint]
+    if: |
+      github.repository_owner == 'tile-ai' &&
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [lint]
     runs-on: ${{ matrix.runner.tags }}
     strategy:
       matrix:
         runner:
+          - tags: [self-hosted, nvidia]
+            name: self-hosted-nvidia
+            # Format: [Nightly-]CUDA-<major>.<minor>[.<patch>]. E.g., "CUDA-12.8" or "Nightly-CUDA-13.0".
+            # Use "Nightly-" prefix to use torch nightly builds.
+            toolkit: CUDA-12.8
+          - tags: [self-hosted, amd, gpu]
+            name: self-hosted-amd
+            # Format: [Nightly-]ROCm-<major>.<minor>[.<patch>]. E.g., "ROCm-6.4" or "Nightly-ROCm-7.0".
+            # Use "Nightly-" prefix to use torch nightly builds.
+            toolkit: Nightly-ROCm-7.1
           - tags: [macos-latest]
             name: macos-latest
             toolkit: Metal # or Nightly-Metal
