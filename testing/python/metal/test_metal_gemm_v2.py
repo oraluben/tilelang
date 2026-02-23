@@ -49,9 +49,7 @@ def assert_gemm_v2(
     accum_dtype=T.float32,
     atol=1e-2,
 ):
-    jit_kernel = matmul_gemm_v2(
-        M, N, K, block_M, block_N, block_K, dtype=dtype, accum_dtype=accum_dtype
-    )
+    jit_kernel = matmul_gemm_v2(M, N, K, block_M, block_N, block_K, dtype=dtype, accum_dtype=accum_dtype)
 
     torch_dtype = dtype.as_torch()
     torch_accum_dtype = accum_dtype.as_torch()
@@ -61,7 +59,7 @@ def assert_gemm_v2(
 
     jit_kernel(a, b, c)
 
-    ref = (a.to(torch_accum_dtype) @ b.to(torch_accum_dtype))
+    ref = a.to(torch_accum_dtype) @ b.to(torch_accum_dtype)
     assert torch.allclose(ref, c, atol=atol), (
         f"Result mismatch for M={M}, N={N}, K={K}, "
         f"block=({block_M},{block_N},{block_K}), dtype={dtype}\n"
@@ -79,7 +77,7 @@ def test_gemm_v2_16x16x8():
     assert_gemm_v2(128, 128, 128, 16, 16, 8)
 
 
-@pytest.mark.xfail(reason='TODO: codegen not support float16x8')
+@pytest.mark.xfail(reason="TODO: codegen not support float16x8")
 @tilelang.testing.requires_metal
 def test_gemm_v2_large():
     assert_gemm_v2(128, 128, 128, 32, 32, 32)

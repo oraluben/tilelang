@@ -218,8 +218,7 @@ public:
     bool has_global_or_shared_buffer = false;
 
     auto is_local_or_fragment = [](const Buffer &buf) {
-      return IsLocalBuffer(buf, /*allow_var=*/true) || IsFragmentBuffer(buf) ||
-             IsMetalSimdgroupBuffer(buf);
+      return IsLocalBuffer(buf, /*allow_var=*/true) || IsFragmentBuffer(buf);
     };
 
     std::vector<BufferVectorInfo> local_fragment_buffers;

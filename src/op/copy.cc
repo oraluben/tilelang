@@ -636,6 +636,14 @@ bool CopyNode::CheckTMemStore(Target target) const {
          dst.scope() == "shared.tmem";
 }
 
+bool CopyNode::CheckSIMDGroupStore(Target target) const {
+  if (TargetIsMetal(target)) {
+    return (src.scope() == "metal.simdgroup") &&
+           (dst.scope() == "metal.simdgroup");
+  }
+  return false;
+}
+
 // Selects the most specific copy instruction for the given target and buffers.
 // Priority: BulkLoad1D, BulkStore1D, BulkLoad, BulkStore, LDSM, STSM, TMemLoad,
 // TMemStore, Normal.
@@ -667,6 +675,8 @@ CopyInst CopyNode::GetCopyInst(Target target, bool disable_tma_lower,
     return CopyInst::kTMemLoad;
   } else if (CheckTMemStore(target)) {
     return CopyInst::kTMemStore;
+  } else if (CheckSIMDGroupStore(target)) {
+    return CopyInst::kMetalSIMDGroup;
   } else {
     return CopyInst::kNormal;
   }
@@ -718,10 +728,8 @@ Stmt CopyNode::LowerNormalCopy(const LowerArgs &T,
   For vectorized_thread_loop;
   auto par_op = ParallelOp(fused_loop);
 
-  if (is_cpu_target || IsLocalBuffer(src) || IsLocalBuffer(dst) ||
-      IsMetalSimdgroupBuffer(src) || IsMetalSimdgroupBuffer(dst)) {
-    if ((IsLocalBuffer(src) || IsMetalSimdgroupBuffer(src)) &&
-        !(IsLocalBuffer(dst) || IsMetalSimdgroupBuffer(dst))) {
+  if (is_cpu_target || IsLocalBuffer(src) || IsLocalBuffer(dst)) {
+    if ((IsLocalBuffer(src)) && !(IsLocalBuffer(dst))) {
       LOG(WARNING) << "Copy from local buffer `" << src->name << "` to "
                    << dst.scope() << " buffer `" << dst->name
                    << "` may cause conflicted write.";
