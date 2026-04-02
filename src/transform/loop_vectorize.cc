@@ -177,6 +177,9 @@ public:
         VectorizeFindMemoryAccess::MaySupportVectorize256(node)) {
       vector_load_bits_max_ = initial_vector_size_ = loop_extent_vector_size_ =
           256;
+    } else if (TargetIsMetal(Target::Current(false))) {
+      vector_load_bits_max_ = initial_vector_size_ = loop_extent_vector_size_ =
+          64;
     } else {
       vector_load_bits_max_ = initial_vector_size_ = loop_extent_vector_size_ =
           128;

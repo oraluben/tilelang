@@ -9,7 +9,6 @@ from tilelang import tvm as tvm
 import tilelang.testing
 import tilelang.language as T
 import torch
-import pytest
 
 
 @tilelang.jit
@@ -77,7 +76,6 @@ def test_gemm_v2_16x16x8():
     assert_gemm_v2(128, 128, 128, 16, 16, 8)
 
 
-@pytest.mark.xfail(reason="TODO: codegen not support float16x8")
 @tilelang.testing.requires_metal
 def test_gemm_v2_large():
     assert_gemm_v2(128, 128, 128, 32, 32, 32)
