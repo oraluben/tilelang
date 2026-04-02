@@ -45,7 +45,8 @@ enum class GemmInst : uint8_t {
   kTCGEN5MMA,
   kMFMA,
   kScalar,
-  kWMMA
+  kWMMA,
+  kMetalExp
 };
 
 /// Convert GemmInst enum to string for debugging
@@ -63,6 +64,8 @@ inline const char *GemmInstToString(GemmInst inst) {
     return "Scalar";
   case GemmInst::kWMMA:
     return "WMMA";
+  case GemmInst::kMetalExp:
+    return "Metal";
   default:
     return "Unknown";
   }

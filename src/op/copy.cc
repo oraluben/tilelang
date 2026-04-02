@@ -765,9 +765,15 @@ bool CopyNode::CheckCPAsyncCopy(Target target, const LayoutMap &layout_map,
   if (!CheckCPAsyncCopyPreconditions()) {
     return false;
   }
-  // Skip vectorize size check here because, during the Infer Layout stage,
-  // the layout is not stable and the vectorized size cannot be determined.
   return true;
+}
+
+bool CopyNode::CheckSIMDGroupStore(Target target) const {
+  if (TargetIsMetal(target)) {
+    return (src.scope() == "metal.simdgroup") &&
+           (dst.scope() == "metal.simdgroup");
+  }
+  return false;
 }
 
 // Selects the most specific copy instruction for the given target and buffers.
@@ -837,6 +843,8 @@ CopyInst CopyNode::GetCopyInst(Target target, const LayoutMap &layout_map,
     return CopyInst::kTMemLoad;
   } else if (CheckTMemStore(target)) {
     return CopyInst::kTMemStore;
+  } else if (CheckSIMDGroupStore(target)) {
+    return CopyInst::kMetalSIMDGroup;
   } else {
     return CopyInst::kNormal;
   }
