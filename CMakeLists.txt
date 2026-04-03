@@ -231,6 +231,7 @@ if(USE_METAL)
   endif()
   file(GLOB TILE_LANG_METAL_SRCS
     src/target/rt_mod_metal.cc
+    src/target/codegen_metal.cc
   )
   list(APPEND TILE_LANG_SRCS ${TILE_LANG_METAL_SRCS})
   # FIXME: CIBW failed with backtrace, why???
