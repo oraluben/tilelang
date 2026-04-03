@@ -969,7 +969,7 @@ Stmt CopyNode::LowerCPAsyncCopy(const LowerArgs &T,
 }
 
 Stmt CopyNode::LowerSIMDGroupCopy(const LowerArgs &T,
-                                    arith::Analyzer *analyzer) const {
+                                  arith::Analyzer *analyzer) const {
   ICHECK(IsSIMDGroupBuffer(src));
   int total_elements = 1;
   for (auto s : src->shape) {
@@ -981,7 +981,8 @@ Stmt CopyNode::LowerSIMDGroupCopy(const LowerArgs &T,
       << "simdgroup buffer size must be multiple of 64 (8x8), got "
       << total_elements;
 
-  ICHECK(dst_range.size() == 2) << "Expected 2D destination for simdgroup store";
+  ICHECK(dst_range.size() == 2)
+      << "Expected 2D destination for simdgroup store";
   PrimExpr dst_row_base = dst_range[0]->min;
   PrimExpr dst_col_base = dst_range[1]->min;
   PrimExpr dst_stride = dst->shape[dst->shape.size() - 1];
@@ -1002,9 +1003,11 @@ Stmt CopyNode::LowerSIMDGroupCopy(const LowerArgs &T,
   float ideal = N > 0 ? static_cast<float>(M) / N : 1.f;
   float best_score = std::numeric_limits<float>::max();
   for (int m = 1; m <= std::min(num_warps, max_m); ++m) {
-    if (num_warps % m != 0) continue;
+    if (num_warps % m != 0)
+      continue;
     int n = num_warps / m;
-    if (n > max_n) continue;
+    if (n > max_n)
+      continue;
     float m_per = static_cast<float>(M) / (m * kMPerWarp);
     float n_per = static_cast<float>(N) / (n * kNPerWarp);
     float score = std::abs(m_per / n_per - ideal);
@@ -1031,21 +1034,19 @@ Stmt CopyNode::LowerSIMDGroupCopy(const LowerArgs &T,
   for (int i = 0; i < warp_row_tiles; i++) {
     for (int j = 0; j < warp_col_tiles; j++) {
       int tile_idx = i * warp_col_tiles + j;
-      PrimExpr row =
-          dst_row_base + warp_m * (warp_row_tiles * 8) + i * 8;
-      PrimExpr col =
-          dst_col_base + warp_n * (warp_col_tiles * 8) + j * 8;
-      PrimExpr ptr =
-          Call(DataType::Handle(), builtin::address_of(),
-               {BufferLoad(dst, {row, col})});
-      stmts.push_back(Evaluate(Call(
-          DataType::Handle(), builtin::simdgroup_store(),
-          {src->data, IntImm(DataType::Int(32), tile_idx), ptr, dst_stride,
-           IntImm(DataType::Int(32), 8), IntImm(DataType::Int(32), 8),
-           Cast(DataType::Bool(), IntImm(DataType::Int(32), 0))})));
+      PrimExpr row = dst_row_base + warp_m * (warp_row_tiles * 8) + i * 8;
+      PrimExpr col = dst_col_base + warp_n * (warp_col_tiles * 8) + j * 8;
+      PrimExpr ptr = Call(DataType::Handle(), builtin::address_of(),
+                          {BufferLoad(dst, {row, col})});
+      stmts.push_back(Evaluate(
+          Call(DataType::Handle(), builtin::simdgroup_store(),
+               {src->data, IntImm(DataType::Int(32), tile_idx), ptr, dst_stride,
+                IntImm(DataType::Int(32), 8), IntImm(DataType::Int(32), 8),
+                Cast(DataType::Bool(), IntImm(DataType::Int(32), 0))})));
     }
   }
-  if (stmts.size() == 1) return stmts[0];
+  if (stmts.size() == 1)
+    return stmts[0];
   return SeqStmt(stmts);
 }
 

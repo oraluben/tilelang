@@ -65,7 +65,6 @@ inline bool IsRegisterBuffer(const Buffer &buffer) {
   return IsFragmentBuffer(buffer) || IsSIMDGroupBuffer(buffer);
 }
 
-
 // Expand a lower-rank layout by prepending the leading dimensions of `buffer`
 // so that the resulting layout input shape matches `buffer->shape`.
 //

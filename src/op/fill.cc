@@ -171,12 +171,13 @@ Stmt FillNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     PrimExpr fill_value = Cast(dst->dtype, value);
     Array<Stmt> stmts;
     for (int i = 0; i < num_matrices; i++) {
-      stmts.push_back(Evaluate(Call(
-          DataType::Handle(), builtin::make_filled_simdgroup_matrix(),
-          {dst->data, IntImm(DataType::Int(32), i), fill_value,
-           IntImm(DataType::Int(32), 8), IntImm(DataType::Int(32), 8)})));
+      stmts.push_back(Evaluate(
+          Call(DataType::Handle(), builtin::make_filled_simdgroup_matrix(),
+               {dst->data, IntImm(DataType::Int(32), i), fill_value,
+                IntImm(DataType::Int(32), 8), IntImm(DataType::Int(32), 8)})));
     }
-    if (stmts.size() == 1) return stmts[0];
+    if (stmts.size() == 1)
+      return stmts[0];
     return SeqStmt(stmts);
   } else if (IsFragmentBuffer(dst)) {
     auto par_op = ParallelOp(MakeSIMTLoop(analyzer));
