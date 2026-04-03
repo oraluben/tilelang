@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .gemm_base import GemmBase
 from .inst import GemmInst
 from tilelang.utils.language import is_shared, is_full_region, is_metal_simdgroup
