@@ -53,12 +53,18 @@ TVM_DLL PrimExpr MakeAccessPtrFromRegion(const BufferRegion &region,
 TVM_DLL PrimExpr MakeAccessPtrFromBufferLoad(const BufferLoad &load,
                                              int rw_mask);
 
-// Check if a buffer is a fragment buffer (scope == "local.fragment" or
-// "metal.simdgroup")
 inline bool IsFragmentBuffer(const Buffer &buffer) {
-  return buffer.defined() && (buffer.scope() == "local.fragment" ||
-                              buffer.scope() == "metal.simdgroup");
+  return buffer.defined() && buffer.scope() == "local.fragment";
 }
+
+inline bool IsSIMDGroupBuffer(const Buffer &buffer) {
+  return buffer.defined() && buffer.scope() == "metal.simdgroup";
+}
+
+inline bool IsRegisterBuffer(const Buffer &buffer) {
+  return IsFragmentBuffer(buffer) || IsSIMDGroupBuffer(buffer);
+}
+
 
 // Expand a lower-rank layout by prepending the leading dimensions of `buffer`
 // so that the resulting layout input shape matches `buffer->shape`.

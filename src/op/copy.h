@@ -294,9 +294,9 @@ public:
 
 protected:
   /*!
-   * \brief Check if Metal simdgroup store is supported.
+   * \brief Check if copy from Metal simdgroup to shared/global is supported.
    */
-  bool CheckSIMDGroupStore(Target target) const;
+  bool CheckSIMDGroupCopy(Target target) const;
 
   /*!
    * \brief Get the copy instruction type.
@@ -342,7 +342,7 @@ protected:
   /*!
    * \brief Generate lowering for simdgroup store.
    */
-  Stmt LowerSIMDGroupStore(const LowerArgs &T, arith::Analyzer *analyzer) const;
+  Stmt LowerSIMDGroupCopy(const LowerArgs &T, arith::Analyzer *analyzer) const;
 
   /*!
    * \brief Generate SIMT (thread-level) loop for copying.

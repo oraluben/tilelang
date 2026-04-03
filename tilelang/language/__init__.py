@@ -44,6 +44,7 @@ from .allocate import (
     alloc_shared,  # noqa: F401
     alloc_fragment,  # noqa: F401
     alloc_global,  # noqa: F401
+    alloc_simdgroup,  # noqa: F401
     alloc_barrier,  # noqa: F401
     alloc_cluster_barrier,  # noqa: F401
     alloc_tmem,  # noqa: F401

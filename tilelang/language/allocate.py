@@ -77,6 +77,23 @@ def alloc_fragment(shape: ShapeType, dtype: DType, scope="local.fragment") -> Bu
     return T.alloc_buffer(shape, dtype, scope=scope)
 
 
+def alloc_simdgroup(shape: ShapeType, dtype: DType) -> Buffer:
+    """Allocate a Metal simdgroup matrix buffer for cooperative register storage.
+
+    Used for GEMM accumulators on Metal targets. Each 8x8 tile is collaboratively
+    held across 32 threads (one simdgroup) and operated on via
+    simdgroup_multiply_accumulate intrinsics.
+
+    Args:
+        shape (tuple): The shape of the buffer (must be multiples of 8 in each dimension)
+        dtype (str): The data type (e.g., 'float32', 'float16')
+
+    Returns:
+        T.Buffer: A TVM buffer in metal.simdgroup scope
+    """
+    return T.alloc_buffer(shape, dtype, scope="metal.simdgroup")
+
+
 @overload
 def alloc_var(dtype: DType, init: PrimExpr | int | float, scope: str = "local.var") -> Buffer: ...
 
