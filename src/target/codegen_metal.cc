@@ -314,7 +314,7 @@ void CodeGenMetal::PrintStorageScope(const std::string &scope,
                                      std::ostream &os) { // NOLINT(*)
   if (scope == "global") {
     os << "device ";
-  } else if (scope == "shared") {
+  } else if (scope == "shared" || scope == "shared.dyn") {
     os << "threadgroup ";
   } else if (scope == "local") {
     os << "thread ";
