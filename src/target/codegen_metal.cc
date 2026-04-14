@@ -473,7 +473,7 @@ void CodeGenTileLangMetal::VisitExpr_(const FloatImmNode *op,
   os << temp.str();
 }
 
-ffi::Module BuildMetal(IRModule mod, Target target) {
+ffi::Module BuildTileLangMetal(IRModule mod, Target target) {
   bool output_ssa = false;
   mod = tir::transform::PointerValueTypeRewrite()(std::move(mod));
 
@@ -515,7 +515,7 @@ ffi::Module BuildMetal(IRModule mod, Target target) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("target.build.tilelang_metal", BuildMetal);
+  refl::GlobalDef().def("target.build.tilelang_metal", BuildTileLangMetal);
 }
 } // namespace codegen
 } // namespace tvm
