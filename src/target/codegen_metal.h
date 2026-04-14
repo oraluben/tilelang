@@ -34,9 +34,9 @@
 namespace tvm {
 namespace codegen {
 
-class CodeGenMetal final : public CodeGenC {
+class CodeGenTileLangMetal final : public CodeGenC {
 public:
-  explicit CodeGenMetal(Target target);
+  explicit CodeGenTileLangMetal(Target target);
   // override print thread tag.
   void PrintArgUnionDecl();
   void AddFunction(const GlobalVar &gvar, const PrimFunc &func) final;

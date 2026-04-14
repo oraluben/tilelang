@@ -38,7 +38,7 @@
 namespace tvm {
 namespace codegen {
 
-void CodeGenMetal::InitFuncState(const PrimFunc &f) {
+void CodeGenTileLangMetal::InitFuncState(const PrimFunc &f) {
   CodeGenC::InitFuncState(f);
   // analyze the data;
   for (Var arg : f->params) {
@@ -48,7 +48,7 @@ void CodeGenMetal::InitFuncState(const PrimFunc &f) {
   }
 }
 
-CodeGenMetal::CodeGenMetal(Target target) : target_(target) {
+CodeGenTileLangMetal::CodeGenTileLangMetal(Target target) : target_(target) {
   decl_stream << "#include <metal_stdlib>\n";
   decl_stream << "using namespace metal;\n\n";
   decl_stream << "union __TVMArgUnion {\n"
@@ -56,7 +56,8 @@ CodeGenMetal::CodeGenMetal(Target target) : target_(target) {
               << "};\n\n";
 }
 
-void CodeGenMetal::AddFunction(const GlobalVar &gvar, const PrimFunc &func) {
+void CodeGenTileLangMetal::AddFunction(const GlobalVar &gvar,
+                                       const PrimFunc &func) {
   // NOTE: There is no inter-function calls among Metal kernels.
   // For now we keep the metal codegen without inter-function call
   // process.
@@ -184,7 +185,7 @@ void CodeGenMetal::AddFunction(const GlobalVar &gvar, const PrimFunc &func) {
   this->stream << "}\n\n";
 }
 
-void CodeGenMetal::BindThreadIndex(const IterVar &iv) {
+void CodeGenTileLangMetal::BindThreadIndex(const IterVar &iv) {
   ICHECK(!var_idmap_.count(iv->var.get()));
   // if we only have threadIdx.x
   // metal will directly print as threadIdx
@@ -196,7 +197,8 @@ void CodeGenMetal::BindThreadIndex(const IterVar &iv) {
       CastFromTo(vname, DataType::UInt(thread_index_bits_), iv->var.dtype());
 }
 
-void CodeGenMetal::PrintType(DataType t, std::ostream &os) { // NOLINT(*)
+void CodeGenTileLangMetal::PrintType(DataType t,
+                                     std::ostream &os) { // NOLINT(*)
   int lanes = t.lanes();
   if (t.is_handle()) {
     ICHECK_EQ(lanes, 1) << "do not yet support vector types";
@@ -276,7 +278,7 @@ void CodeGenMetal::PrintType(DataType t, std::ostream &os) { // NOLINT(*)
   LOG(FATAL) << "Cannot convert type " << t << " to Metal type";
 }
 
-void CodeGenMetal::PrintStorageSync(const CallNode *op) {
+void CodeGenTileLangMetal::PrintStorageSync(const CallNode *op) {
   const std::string &sync = op->args[0].as<StringImmNode>()->value;
   if (sync == "warp") {
     this->PrintIndent();
@@ -289,8 +291,9 @@ void CodeGenMetal::PrintStorageSync(const CallNode *op) {
   }
 }
 
-void CodeGenMetal::PrintVecElemLoad(const std::string &vec, DataType t, int i,
-                                    std::ostream &os) { // NOLINT(*)
+void CodeGenTileLangMetal::PrintVecElemLoad(const std::string &vec, DataType t,
+                                            int i,
+                                            std::ostream &os) { // NOLINT(*)
   if (t.is_float16() && t.lanes() > 4) {
     os << "((thread half*)(&" << vec << "))[" << i << "]";
   } else {
@@ -298,8 +301,8 @@ void CodeGenMetal::PrintVecElemLoad(const std::string &vec, DataType t, int i,
   }
 }
 
-void CodeGenMetal::PrintVecElemStore(const std::string &vec, DataType t, int i,
-                                     const std::string &value) {
+void CodeGenTileLangMetal::PrintVecElemStore(const std::string &vec, DataType t,
+                                             int i, const std::string &value) {
   this->PrintIndent();
   if (t.is_float16() && t.lanes() > 4) {
     stream << "((thread half*)(&" << vec << "))[" << i << "] = " << value
@@ -310,8 +313,8 @@ void CodeGenMetal::PrintVecElemStore(const std::string &vec, DataType t, int i,
   }
 }
 
-void CodeGenMetal::PrintStorageScope(const std::string &scope,
-                                     std::ostream &os) { // NOLINT(*)
+void CodeGenTileLangMetal::PrintStorageScope(const std::string &scope,
+                                             std::ostream &os) { // NOLINT(*)
   if (scope == "global") {
     os << "device ";
   } else if (scope == "shared" || scope == "shared.dyn") {
@@ -323,7 +326,7 @@ void CodeGenMetal::PrintStorageScope(const std::string &scope,
   }
 }
 
-void CodeGenMetal::VisitStmt_(const AllocateNode *op) {
+void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
   ICHECK(!is_zero(op->condition));
   std::string vid = AllocVarID(op->buffer_var.get());
 
@@ -359,14 +362,14 @@ void CodeGenMetal::VisitStmt_(const AllocateNode *op) {
   this->PrintStmt(op->body);
 }
 
-void CodeGenMetal::VisitExpr_(const SelectNode *op,
-                              std::ostream &os) { // NOLINT(*)
+void CodeGenTileLangMetal::VisitExpr_(const SelectNode *op,
+                                      std::ostream &os) { // NOLINT(*)
   os << "select(" << PrintExpr(op->false_value) << ", "
      << PrintExpr(op->true_value) << ", " << PrintExpr(op->condition) << ")";
 }
 
-void CodeGenMetal::VisitExpr_(const BroadcastNode *op,
-                              std::ostream &os) { // NOLINT(*)
+void CodeGenTileLangMetal::VisitExpr_(const BroadcastNode *op,
+                                      std::ostream &os) { // NOLINT(*)
   std::string v = PrintExpr(op->value);
   int lanes = op->dtype.lanes();
   if (op->dtype.is_float16() && lanes > 4 && lanes % 2 == 0) {
@@ -389,8 +392,8 @@ void CodeGenMetal::VisitExpr_(const BroadcastNode *op,
   }
 }
 
-void CodeGenMetal::VisitExpr_(const CallNode *op,
-                              std::ostream &os) { // NOLINT(*)
+void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
+                                      std::ostream &os) { // NOLINT(*)
   CHECK(!op->op.as<GlobalVarNode>())
       << "CodegenMetal does not support inter-function calls, "
       << "but expression " << ffi::GetRef<Call>(op) << " calls PrimFunc "
@@ -449,8 +452,8 @@ void CodeGenMetal::VisitExpr_(const CallNode *op,
   }
 }
 
-void CodeGenMetal::VisitExpr_(const FloatImmNode *op,
-                              std::ostream &os) { // NOLINT(*)
+void CodeGenTileLangMetal::VisitExpr_(const FloatImmNode *op,
+                                      std::ostream &os) { // NOLINT(*)
   std::ostringstream temp;
   if (std::isinf(op->value)) {
     if (op->value < 0) {
@@ -482,19 +485,19 @@ ffi::Module BuildMetal(IRModule mod, Target target) {
 
   for (auto kv : mod->functions) {
     ICHECK(kv.second->IsInstance<PrimFuncNode>())
-        << "CodeGenMetal: Can only take PrimFunc";
+        << "CodeGenTileLangMetal: Can only take PrimFunc";
     auto global_symbol =
         kv.second->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol);
     ICHECK(global_symbol.has_value());
     std::string func_name = global_symbol.value();
 
     source_maker << "// Function: " << func_name << "\n";
-    CodeGenMetal cg(target);
+    CodeGenTileLangMetal cg(target);
     cg.Init(output_ssa);
     auto f = Downcast<PrimFunc>(kv.second);
     auto calling_conv = f->GetAttr<Integer>(tvm::attr::kCallingConv);
     ICHECK(calling_conv == CallingConv::kDeviceKernelLaunch)
-        << "CodeGenMetal: expect calling_conv equals "
+        << "CodeGenTileLangMetal: expect calling_conv equals "
            "CallingConv::kDeviceKernelLaunch";
 
     cg.AddFunction(kv.first, f);
