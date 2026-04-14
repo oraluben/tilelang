@@ -30,7 +30,7 @@ def matmul_gemm_v2(M, N, K, block_M, block_N, block_K, dtype=T.float16, accum_dt
                 T.copy(A[by * block_M, ko * block_K], A_shared)
                 T.copy(B[ko * block_K, bx * block_N], B_shared)
 
-                T.gemm_v2(A_shared, B_shared, C_local)
+                T.gemm(A_shared, B_shared, C_local)
 
             T.copy(C_local, C[by * block_M, bx * block_N])
 
