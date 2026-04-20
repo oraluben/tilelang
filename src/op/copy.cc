@@ -1091,7 +1091,9 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
   int N = src_range[1]->extent.as<IntImmNode>()->value;
 
   int kMPerWarp = kTileSize;
-  int kNPerWarp = kTileSize;
+  // Metal MMA uses matmul2d(16,32,16) producing 16×32 output tiles,
+  // so the minimum N per warp is 32 to match the GEMM warp partition.
+  int kNPerWarp = TargetIsMetal(T.target) ? kTileSize * 2 : kTileSize;
   int m_warp = 1, n_warp = num_warps;
   int max_m = M / kMPerWarp;
   int max_n = N / kNPerWarp;

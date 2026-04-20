@@ -115,6 +115,7 @@ class MPSIntrinEmitter:
         micro_size_y = self.micro_size_y
         micro_size_k = self.micro_size_k
         a_transposed = self.a_transposed
+        warp_row_tiles = self.warp_row_tiles
 
         warp_m, _ = self._get_warp_indices()
 
@@ -129,9 +130,9 @@ class MPSIntrinEmitter:
             for i in T.serial(warp_rows):
                 if a_transposed:
                     row_idx = offset_k + ki * micro_size_k
-                    col_idx = offset_m + warp_m * (self.warp_row_tiles) + i * micro_size_x
+                    col_idx = offset_m + warp_m * warp_row_tiles + i * micro_size_x
                 else:
-                    row_idx = offset_m + warp_m * (self.warp_row_tiles) + i * micro_size_x
+                    row_idx = offset_m + warp_m * warp_row_tiles + i * micro_size_x
                     col_idx = offset_k + ki * micro_size_k
 
                 ptr = T.access_ptr(buffer[buf_idx(leading, row_idx, col_idx)], "r")
@@ -160,6 +161,7 @@ class MPSIntrinEmitter:
         b_transposed = self.b_transposed
 
         _, warp_n = self._get_warp_indices()
+        warp_n_offset = warp_n * self.warp_col_tiles
 
         buffer, offset_k, offset_n, stride, leading = self._parse_buffer_2d(B_shared_buf)
         if self.b_stride_override is not None:
@@ -168,14 +170,14 @@ class MPSIntrinEmitter:
         buf_idx = self._buf_idx
 
         @T.macro
-        def _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n, ki):
+        def _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n_offset, ki):
             for j in T.serial(warp_cols):
                 if b_transposed:
-                    row_idx = offset_n + warp_n * (self.warp_col_tiles) + j * micro_size_y
+                    row_idx = offset_n + warp_n_offset + j * micro_size_y
                     col_idx = offset_k + ki * micro_size_k
                 else:
                     row_idx = offset_k + ki * micro_size_k
-                    col_idx = offset_n + warp_n * (self.warp_col_tiles) + j * micro_size_y
+                    col_idx = offset_n + warp_n_offset + j * micro_size_y
 
                 ptr = T.access_ptr(buffer[buf_idx(leading, row_idx, col_idx)], "r")
 
@@ -193,7 +195,7 @@ class MPSIntrinEmitter:
                     OPERAND_RIGHT,
                 )
 
-        return _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n, ki)
+        return _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n_offset, ki)
 
     def mma(self, A_local_buf, B_local_buf, C_local_buf):
         warp_rows = self.warp_rows
@@ -227,6 +229,8 @@ class MPSIntrinEmitter:
         micro_size_y = self.micro_size_y
 
         warp_m, warp_n = self._get_warp_indices()
+        warp_m_offset = warp_m * self.warp_row_tiles
+        warp_n_offset = warp_n * self.warp_col_tiles
 
         buffer, offset_m, offset_n, stride, leading = self._parse_buffer_2d(C_dst)
 
@@ -235,10 +239,10 @@ class MPSIntrinEmitter:
         buf_idx = self._buf_idx
 
         @T.macro
-        def _simdgroup_copy(C_simd_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n):
+        def _simdgroup_copy(C_simd_buf, buffer, offset_m, offset_n, stride, warp_m_offset, warp_n_offset):
             for i, j in T.grid(warp_rows, warp_cols):
-                row = offset_m + warp_m * self.warp_row_tiles + i * micro_size_x
-                col = offset_n + warp_n * self.warp_col_tiles + j * micro_size_y
+                row = offset_m + warp_m_offset + i * micro_size_x
+                col = offset_n + warp_n_offset + j * micro_size_y
 
                 index_c = i * warp_cols + j
 
@@ -256,7 +260,7 @@ class MPSIntrinEmitter:
                     OPERAND_DEST,
                 )
 
-        return _simdgroup_copy(C_simd_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n)
+        return _simdgroup_copy(C_simd_buf, buffer, offset_m, offset_n, stride, warp_m_offset, warp_n_offset)
 
     def simd_store(self, C_simd_buf, C_dst):
         return self.simdgroup_copy(C_simd_buf, C_dst, is_store=True)
