@@ -3,7 +3,7 @@ from __future__ import annotations
 from .gemm_base import GemmBase
 from .inst import GemmInst
 from tilelang.layout import Layout, make_linear_layout
-from tilelang.utils.language import is_shared, is_full_region, is_metal_cooperative_tensor, is_fragment
+from tilelang.utils.language import is_shared, is_global, is_full_region, is_metal_cooperative_tensor, is_fragment
 from tilelang import tvm as tvm
 from tvm.target import Target
 from tvm.ir import Range
@@ -26,6 +26,9 @@ def _make_padded_layout(buffer):
 class GemmMetal(GemmBase):
     def is_gemm_ss(self) -> bool:
         return is_shared(self.A) and is_shared(self.B)
+
+    def is_gemm_gg(self) -> bool:
+        return is_global(self.A) and is_global(self.B)
 
     def infer_layout(self, target: Target, thread_nums: int):
         if self.is_gemm_ss():
