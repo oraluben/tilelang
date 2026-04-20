@@ -91,17 +91,23 @@ class MPSIntrinEmitter:
     def _parse_buffer_2d(buf):
         if isinstance(buf, BufferRegion):
             buffer = buf.buffer
+            leading = tuple(r.min for r in buf.region[:-2])
             off_row = buf.region[-2].min
             off_col = buf.region[-1].min
         else:
             buffer = buf
+            leading = ()
             off_row = 0
             off_col = 0
         if buffer.strides and len(buffer.strides) >= 2:
             stride = buffer.strides[-2]
         else:
             stride = buffer.shape[-1]
-        return buffer, off_row, off_col, stride
+        return buffer, off_row, off_col, stride, leading
+
+    @staticmethod
+    def _buf_idx(leading, row, col):
+        return (*leading, row, col)
 
     def ldmatrix_a(self, A_local_buf, A_shared_buf: Buffer | BufferRegion, ki):
         warp_rows = self.warp_rows
@@ -112,9 +118,11 @@ class MPSIntrinEmitter:
 
         warp_m, _ = self._get_warp_indices()
 
-        buffer, offset_m, offset_k, stride = self._parse_buffer_2d(A_shared_buf)
+        buffer, offset_m, offset_k, stride, leading = self._parse_buffer_2d(A_shared_buf)
         if self.a_stride_override is not None:
             stride = self.a_stride_override
+
+        buf_idx = self._buf_idx
 
         @T.macro
         def _warp_ldmatrix_a(A_local_buf, buffer, offset_m, offset_k, stride, warp_m, ki):
@@ -126,7 +134,7 @@ class MPSIntrinEmitter:
                     row_idx = offset_m + warp_m * (self.warp_row_tiles) + i * micro_size_x
                     col_idx = offset_k + ki * micro_size_k
 
-                ptr = T.access_ptr(buffer[row_idx, col_idx], "r")
+                ptr = T.access_ptr(buffer[buf_idx(leading, row_idx, col_idx)], "r")
 
                 T.cooperative_tensor_load(
                     A_local_buf.data,
@@ -153,9 +161,11 @@ class MPSIntrinEmitter:
 
         _, warp_n = self._get_warp_indices()
 
-        buffer, offset_k, offset_n, stride = self._parse_buffer_2d(B_shared_buf)
+        buffer, offset_k, offset_n, stride, leading = self._parse_buffer_2d(B_shared_buf)
         if self.b_stride_override is not None:
             stride = self.b_stride_override
+
+        buf_idx = self._buf_idx
 
         @T.macro
         def _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n, ki):
@@ -167,7 +177,7 @@ class MPSIntrinEmitter:
                     row_idx = offset_k + ki * micro_size_k
                     col_idx = offset_n + warp_n * (self.warp_col_tiles) + j * micro_size_y
 
-                ptr = T.access_ptr(buffer[row_idx, col_idx], "r")
+                ptr = T.access_ptr(buffer[buf_idx(leading, row_idx, col_idx)], "r")
 
                 T.cooperative_tensor_load(
                     B_local_buf.data,
@@ -218,10 +228,11 @@ class MPSIntrinEmitter:
 
         warp_m, warp_n = self._get_warp_indices()
 
-        buffer, offset_m, offset_n, stride = self._parse_buffer_2d(C_dst)
+        buffer, offset_m, offset_n, stride, leading = self._parse_buffer_2d(C_dst)
 
         ct_op = T.cooperative_tensor_store if is_store else T.cooperative_tensor_load
         access_mode = "w" if is_store else "r"
+        buf_idx = self._buf_idx
 
         @T.macro
         def _simdgroup_copy(C_simd_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n):
@@ -234,7 +245,7 @@ class MPSIntrinEmitter:
                 ct_op(
                     C_simd_buf.data,
                     index_c,
-                    T.access_ptr(buffer[row, col], access_mode),
+                    T.access_ptr(buffer[buf_idx(leading, row, col)], access_mode),
                     stride,
                     micro_size_x,
                     micro_size_y,
