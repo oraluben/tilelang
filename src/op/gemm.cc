@@ -60,8 +60,16 @@ Gemm::Gemm(Array<PrimExpr> args, Map<String, ObjectRef> annotations) {
   node->clearAccum_ = args[9].as<PrimExpr>().value();
   node->strideA_ = args[10].as<IntImm>().value()->value;
   node->strideB_ = args[11].as<IntImm>().value()->value;
-  node->offsetA_ = args[12].as<IntImm>().value()->value;
-  node->offsetB_ = args[13].as<IntImm>().value()->value;
+  if (auto int_val = args[12].as<IntImm>()) {
+    node->offsetA_ = int_val.value()->value;
+  } else {
+    node->offsetA_ = 0;
+  }
+  if (auto int_val = args[13].as<IntImm>()) {
+    node->offsetB_ = int_val.value()->value;
+  } else {
+    node->offsetB_ = 0;
+  }
   if (args.size() > 14) {
     node->kPack_ = args[14].as<IntImm>().value()->value;
     if (node->kPack_ != 1 && node->kPack_ != 2) {

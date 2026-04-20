@@ -95,15 +95,11 @@ class GemmMetal(GemmBase):
 
         assert block_K >= micro_size_k, f"block_K ({block_K}) must be >= micro_size_k ({micro_size_k})"
         assert is_full_region(C_region), "Fragment output C must be a full region"
-        assert c_in_cooperative_tensor or is_shared(C_buf), (
-            f"Metal GEMM requires C in local.fragment, metal.cooperative_tensor, or shared scope, got {C_buf.scope()}"
-        )
-
-        if self.is_gemm_ss():
+        if self.is_gemm_ss() or self.is_gemm_gg():
             if c_in_cooperative_tensor:
 
                 @T.prim_func
-                def _gemm_ss_cooperative_tensor() -> None:
+                def _gemm_cooperative_tensor() -> None:
                     A_local = T.alloc_local((warp_rows * 512), in_dtype, scope="metal.cooperative_tensor")
                     B_local = T.alloc_local((warp_cols * 512), in_dtype, scope="metal.cooperative_tensor")
                     if clear_accum:
@@ -114,11 +110,11 @@ class GemmMetal(GemmBase):
                         mps_emitter.ldmatrix_b(B_local, B_region, ki)
                         mps_emitter.mma(A_local, B_local, C_buf)
 
-                return _Simplify(_gemm_ss_cooperative_tensor, inline_let=True)
+                return _Simplify(_gemm_cooperative_tensor, inline_let=True)
             else:
 
                 @T.prim_func
-                def _gemm_ss_shared() -> None:
+                def _gemm_with_c_writeback() -> None:
                     A_local = T.alloc_local((warp_rows * 512), in_dtype, scope="metal.cooperative_tensor")
                     B_local = T.alloc_local((warp_cols * 512), in_dtype, scope="metal.cooperative_tensor")
                     C_ct = T.alloc_local((num_simd_c * 256), accum_dtype, scope="metal.cooperative_tensor")
@@ -134,6 +130,6 @@ class GemmMetal(GemmBase):
 
                     mps_emitter.simd_store(C_ct, C_buf)
 
-                return _Simplify(_gemm_ss_shared, inline_let=True)
+                return _Simplify(_gemm_with_c_writeback, inline_let=True)
         else:
             raise ValueError(f"Unsupported gemm combination, A: {self.A.scope()}, B: {self.B.scope()}")
