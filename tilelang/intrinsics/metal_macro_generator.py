@@ -1,8 +1,32 @@
+"""Metal MPS intrinsic emitter for cooperative_tensor (NAX) GEMM.
+
+Generates TIR macro calls for the four cooperative_tensor builtins
+(fill, load, store, multiply_accumulate) that get lowered to MPP
+matmul2d code in codegen_metal.cc.
+
+Fragment geometry:
+  - Base fragment: 16×16, 8 elements per thread (32 threads/simdgroup)
+  - micro_size_k = 32 to satisfy MPP constraint: at least one of M, N, K ≥ 32
+  - MMA tile (micro_size_x, micro_size_y, micro_size_k) = (16, 16, 32)
+  - A tile: 16×32 = 2 fragments along K, 16 elems/thread
+  - B tile: 32×16 = 2 fragments along K, 16 elems/thread
+  - C tile: 16×16 = 1 fragment, 8 elems/thread
+
+Operand roles passed to cooperative_tensor_load/store tell the codegen
+which operand the data belongs to (left=A, right=B, destination=C).
+Currently the fragment layout is identical for all roles — see
+codegen_metal.cc file header for details.
+"""
+
 from __future__ import annotations
 
 import tilelang.language as T
 from tvm import tir
 from tvm.tir import Buffer, BufferRegion
+
+OPERAND_LEFT = 0
+OPERAND_RIGHT = 1
+OPERAND_DEST = 2
 
 
 class MPSIntrinEmitter:
@@ -34,9 +58,9 @@ class MPSIntrinEmitter:
         self.chunk = chunk
         self.thread_var = thread_var
 
-        self.micro_size_x = 8
-        self.micro_size_y = 8
-        self.micro_size_k = 8
+        self.micro_size_x = 16
+        self.micro_size_y = 16
+        self.micro_size_k = 32
 
         self.warp_rows = warp_row_tiles // self.micro_size_x
         self.warp_cols = warp_col_tiles // self.micro_size_y
@@ -75,6 +99,7 @@ class MPSIntrinEmitter:
     def ldmatrix_a(self, A_local_buf, A_shared_buf: Buffer | BufferRegion, ki):
         warp_rows = self.warp_rows
         micro_size_x = self.micro_size_x
+        micro_size_y = self.micro_size_y
         micro_size_k = self.micro_size_k
         a_transposed = self.a_transposed
 
@@ -102,12 +127,17 @@ class MPSIntrinEmitter:
                     micro_size_x,
                     micro_size_k,
                     T.bool(a_transposed),
+                    micro_size_x,
+                    micro_size_y,
+                    micro_size_k,
+                    OPERAND_LEFT,
                 )
 
         return _warp_ldmatrix_a(A_local_buf, buffer, offset_m, offset_k, stride, warp_m, ki)
 
     def ldmatrix_b(self, B_local_buf, B_shared_buf: Buffer | BufferRegion, ki):
         warp_cols = self.warp_cols
+        micro_size_x = self.micro_size_x
         micro_size_y = self.micro_size_y
         micro_size_k = self.micro_size_k
         b_transposed = self.b_transposed
@@ -136,6 +166,10 @@ class MPSIntrinEmitter:
                     micro_size_k,
                     micro_size_y,
                     T.bool(b_transposed),
+                    micro_size_x,
+                    micro_size_y,
+                    micro_size_k,
+                    OPERAND_RIGHT,
                 )
 
         return _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n, ki)
@@ -194,6 +228,10 @@ class MPSIntrinEmitter:
                     micro_size_x,
                     micro_size_y,
                     T.bool(False),
+                    micro_size_x,
+                    micro_size_y,
+                    self.micro_size_k,
+                    OPERAND_DEST,
                 )
 
         return _simdgroup_copy(C_simd_buf, buffer, offset_m, offset_n, stride, warp_m, warp_n)

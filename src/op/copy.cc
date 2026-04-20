@@ -1070,9 +1070,11 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
     ICHECK(imm) << "cooperative_tensor buffer must have constant shape";
     total_elements *= imm->value;
   }
-  ICHECK(total_elements % 64 == 0)
-      << "cooperative_tensor buffer size must be multiple of 64, got "
-      << total_elements;
+  int kTileSize = 16;
+  int tile_elems = kTileSize * kTileSize;
+  ICHECK(total_elements % tile_elems == 0)
+      << "cooperative_tensor buffer size must be multiple of " << tile_elems
+      << ", got " << total_elements;
 
   ICHECK(dst_range.size() == 2)
       << "Expected 2D destination for cooperative_tensor store";
@@ -1088,8 +1090,8 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
   int M = src_range[0]->extent.as<IntImmNode>()->value;
   int N = src_range[1]->extent.as<IntImmNode>()->value;
 
-  int kMPerWarp = 8;
-  int kNPerWarp = 8;
+  int kMPerWarp = kTileSize;
+  int kNPerWarp = kTileSize;
   int m_warp = 1, n_warp = num_warps;
   int max_m = M / kMPerWarp;
   int max_n = N / kNPerWarp;
@@ -1111,13 +1113,13 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
     }
   }
 
-  ICHECK(M >= m_warp * 8 && N >= n_warp * 8)
+  ICHECK(M >= m_warp * kTileSize && N >= n_warp * kTileSize)
       << "Cannot partition " << M << "x" << N << " matrix across " << m_warp
-      << "x" << n_warp << " warps with 8x8 tiles";
-  int warp_row_tiles = M / m_warp / 8;
-  int warp_col_tiles = N / n_warp / 8;
+      << "x" << n_warp << " warps with " << kTileSize << "x" << kTileSize << " tiles";
+  int warp_row_tiles = M / m_warp / kTileSize;
+  int warp_col_tiles = N / n_warp / kTileSize;
   ICHECK(warp_row_tiles > 0 && warp_col_tiles > 0);
-  ICHECK(warp_row_tiles * warp_col_tiles * 64 <= total_elements)
+  ICHECK(warp_row_tiles * warp_col_tiles * tile_elems <= total_elements)
       << "Warp partition produces more tiles than buffer capacity";
 
   PrimExpr warp_m = FloorMod(warp_id, m_warp);
@@ -1127,15 +1129,19 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
   for (int i = 0; i < warp_row_tiles; i++) {
     for (int j = 0; j < warp_col_tiles; j++) {
       int tile_idx = i * warp_col_tiles + j;
-      PrimExpr row = dst_row_base + warp_m * (warp_row_tiles * 8) + i * 8;
-      PrimExpr col = dst_col_base + warp_n * (warp_col_tiles * 8) + j * 8;
+      PrimExpr row = dst_row_base + warp_m * (warp_row_tiles * kTileSize) + i * kTileSize;
+      PrimExpr col = dst_col_base + warp_n * (warp_col_tiles * kTileSize) + j * kTileSize;
       PrimExpr ptr = Call(DataType::Handle(), builtin::address_of(),
                           {BufferLoad(dst, {row, col})});
+      int kMMAK = 32;
       stmts.push_back(Evaluate(
           Call(DataType::Handle(), builtin::cooperative_tensor_store(),
                {src->data, IntImm(DataType::Int(32), tile_idx), ptr, dst_stride,
-                IntImm(DataType::Int(32), 8), IntImm(DataType::Int(32), 8),
-                Cast(DataType::Bool(), IntImm(DataType::Int(32), 0))})));
+                IntImm(DataType::Int(32), kTileSize), IntImm(DataType::Int(32), kTileSize),
+                Cast(DataType::Bool(), IntImm(DataType::Int(32), 0)),
+                IntImm(DataType::Int(32), kTileSize), IntImm(DataType::Int(32), kTileSize),
+                IntImm(DataType::Int(32), kMMAK),
+                IntImm(DataType::Int(32), 2)})));
     }
   }
   if (stmts.size() == 1)

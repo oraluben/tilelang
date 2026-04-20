@@ -67,23 +67,18 @@ def assert_gemm_v2(
 
 
 @tilelang.testing.requires_metal
-def test_gemm_v2_16x16x16():
-    assert_gemm_v2(128, 128, 128, 16, 16, 16)
-
-
-@tilelang.testing.requires_metal
-def test_gemm_v2_16x16x8():
-    assert_gemm_v2(128, 128, 128, 16, 16, 8)
-
-
-@tilelang.testing.requires_metal
-def test_gemm_v2_large():
+def test_gemm_v2_32x32x32():
     assert_gemm_v2(128, 128, 128, 32, 32, 32)
 
 
 @tilelang.testing.requires_metal
+def test_gemm_v2_64x64x32():
+    assert_gemm_v2(128, 128, 128, 64, 64, 32)
+
+
+@tilelang.testing.requires_metal
 def test_gemm_v2_1024():
-    assert_gemm_v2(1024, 1024, 1024, 16, 16, 16, atol=1.0)
+    assert_gemm_v2(1024, 1024, 1024, 64, 64, 32, atol=1.0)
 
 
 if __name__ == "__main__":

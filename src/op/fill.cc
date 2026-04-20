@@ -164,17 +164,18 @@ Stmt FillNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
       region_elements *= imm->value;
     }
     int total_elements = region_elements;
-    ICHECK(total_elements % 64 == 0)
-        << "cooperative_tensor buffer size must be multiple of 64, got "
-        << total_elements;
-    int num_matrices = total_elements / 64;
+    int tile_elems = 256;
+    ICHECK(total_elements % tile_elems == 0)
+        << "cooperative_tensor buffer size must be multiple of " << tile_elems
+        << ", got " << total_elements;
+    int num_tiles = total_elements / tile_elems;
     PrimExpr fill_value = Cast(dst->dtype, value);
     Array<Stmt> stmts;
-    for (int i = 0; i < num_matrices; i++) {
+    for (int i = 0; i < num_tiles; i++) {
       stmts.push_back(Evaluate(
           Call(DataType::Handle(), builtin::cooperative_tensor_fill(),
                {dst->data, IntImm(DataType::Int(32), i), fill_value,
-                IntImm(DataType::Int(32), 8), IntImm(DataType::Int(32), 8)})));
+                IntImm(DataType::Int(32), 16), IntImm(DataType::Int(32), 16)})));
     }
     if (stmts.size() == 1)
       return stmts[0];

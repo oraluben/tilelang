@@ -19,6 +19,97 @@
 
 /*!
  * \file codegen_metal.cc
+ *
+ * Metal codegen for TileLang, with Apple M5+ NAX tensor core support via
+ * MetalPerformancePrimitives (MPP) matmul2d.
+ *
+ * == Architecture Overview ==
+ *
+ * Two paths exist for matrix operations on Metal:
+ *
+ * 1. simdgroup_matrix (M1-M4): Uses `simdgroup_matrix<T, 8, 8>` types with
+ *    `simdgroup_load/store/multiply_accumulate`.  8×8 tiles, 64 elements per
+ *    tile, 2 elements per thread (32 threads/simdgroup).
+ *
+ * 2. cooperative_tensor (M5+ NAX): Uses `mpp::tensor_ops::matmul2d` from the
+ *    MetalPerformancePrimitives framework.  16×16 base fragments, 8 elements
+ *    per thread.  Requires Metal Shading Language 4.0 and the MPP header.
+ *
+ * == MPP matmul2d Codegen Design ==
+ *
+ * The cooperative_tensor path uses four TIR builtins:
+ *   - cooperative_tensor_fill:   zero a thread-private fragment array
+ *   - cooperative_tensor_load:   threadgroup memory → thread-private array
+ *   - cooperative_tensor_store:  thread-private array → threadgroup memory
+ *   - cooperative_tensor_multiply_accumulate:  MMA on thread-private arrays
+ *
+ * Data flow:
+ *   threadgroup mem ──load──> thread T arr[N] ──copy──> cooperative_tensor
+ *                                                          ↓ matmul2d.run()
+ *   threadgroup mem <──store── thread T arr[N] <──copy── cooperative_tensor
+ *
+ * Thread-private arrays (`thread T arr[N]`) act as a portable intermediary
+ * between threadgroup memory and the opaque cooperative_tensor registers.
+ * The load/store builtins handle the threadgroup↔array transfer using
+ * explicit per-thread coordinate calculations, while the MMA builtin handles
+ * the array↔cooperative_tensor transfer via sequential element copy.
+ *
+ * == Fragment Layout (16×16 base tile, 8 elements/thread) ==
+ *
+ * Each thread in a 32-thread simdgroup owns 8 elements of a 16×16 matrix.
+ * The mapping from simd_lane_id to (base_row, base_col) is:
+ *
+ *   qid      = lane >> 2
+ *   base_row = (qid & 4) | ((lane >> 1) & 3)    // 0..15 with stride pattern
+ *   base_col = ((qid & 2) | (lane & 1)) * 4     // 0, 4, 8, or 12
+ *
+ * Each thread then holds 2 rows × 4 cols = 8 elements:
+ *   element i → row = base_row + (i >> 2) * 8,  col = base_col + (i & 3)
+ *
+ * The two rows are 8 apart (rows R and R+8 within the 16-row tile), and
+ * the four cols are contiguous starting at base_col.
+ *
+ * This layout is derived from Apple's MLX NAX implementation (BaseNAXFrag)
+ * and is compatible with the cooperative_tensor register format expected by
+ * mpp::tensor_ops::matmul2d.
+ *
+ * == MMA Tile Dimensions ==
+ *
+ * MPP matmul2d requires at least one of M, N, K to be 32.  We use
+ * (M=16, N=16, K=32) as the micro-tile, meaning:
+ *   - Left operand A:  16×32 = two 16×16 fragments along K → 16 elems/thread
+ *   - Right operand B: 32×16 = two 16×16 fragments along K → 16 elems/thread
+ *   - Destination C:   16×16 = one fragment → 8 elems/thread
+ *
+ * The cooperative_tensor holds fragments contiguously: ct[0..7] = first
+ * 16×16 fragment, ct[8..15] = second fragment (for A and B).
+ *
+ * == B Operand Convention ==
+ *
+ * Our B_shared is stored row-major as [K, N].  MPP NN mode (both transpose
+ * flags false) internally handles the right operand correctly when data is
+ * loaded using the same row-major fragment layout as the left operand.
+ * No explicit transpose or coordinate swapping is needed in the load path —
+ * this was verified empirically (see git history for the debugging process).
+ *
+ * == Key Pitfalls Resolved ==
+ *
+ * 1. get_multidimensional_index() is NOT usable for load/store.
+ *    It returns cooperative_tensor-internal logical coordinates, not the
+ *    row/col positions in the source matrix.  Using it to index into
+ *    threadgroup memory produces wrong data.  The manual lane-id-based
+ *    coordinate calculation (matching MLX's BaseNAXFrag::get_coord) is
+ *    required instead.
+ *
+ * 2. Metal address space qualifiers are mandatory on pointer casts.
+ *    `((half*)ptr)` is illegal in Metal; must be `((threadgroup half*)ptr)`
+ *    or `((thread float*)ptr)`.  GetAddrSpaceOf() resolves the correct
+ *    qualifier by walking the expression tree to find the buffer's storage
+ *    scope.
+ *
+ * 3. Metal 4.0 runtime is required.  The TVM Metal runtime must compile
+ *    shaders with MTLLanguageVersion4_0 for MPP headers to be available.
+ *    This is a fork-only change (not upstreamed to apache/tvm).
  */
 #include "codegen_metal.h"
 
@@ -50,6 +141,7 @@ void CodeGenTileLangMetal::InitFuncState(const PrimFunc &f) {
 
 CodeGenTileLangMetal::CodeGenTileLangMetal(Target target) : target_(target) {
   decl_stream << "#include <metal_stdlib>\n";
+  decl_stream << "#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>\n";
   decl_stream << "using namespace metal;\n\n";
   decl_stream << "union __TVMArgUnion {\n"
               << " int v_int[2];\n"
@@ -352,8 +444,9 @@ void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
     PrintType(op->dtype, dtype_os);
     std::string dtype_str = dtype_os.str();
     cooperative_tensor_dtype_[op->buffer_var.get()] = dtype_str;
-    stream << "simdgroup_" << dtype_str << "8x8 " << vid << '['
-           << constant_size / 64 << "];\n";
+    int elems_per_thread = constant_size / 32;
+    stream << "thread " << dtype_str << " " << vid << '['
+           << elems_per_thread << "];\n";
   } else if (scope == "metal.simdgroup") {
     ICHECK(op->dtype == DataType::Float(16) ||
            op->dtype == DataType::Float(32) ||
@@ -409,6 +502,36 @@ void CodeGenTileLangMetal::VisitExpr_(const BroadcastNode *op,
   }
 }
 
+std::string CodeGenTileLangMetal::GetAddrSpaceOf(const PrimExpr &ptr_expr) const {
+  if (auto *call = ptr_expr.as<CallNode>()) {
+    if (call->op.same_as(builtin::address_of())) {
+      if (auto *load = call->args[0].as<BufferLoadNode>()) {
+        auto it = alloc_storage_scope_.find(load->buffer->data.get());
+        if (it != alloc_storage_scope_.end()) {
+          const std::string &scope = it->second;
+          if (scope == "shared" || scope == "shared.dyn") return "threadgroup";
+          if (scope == "local" || scope == "metal.cooperative_tensor") return "thread";
+          if (scope == "global") return "device";
+        }
+      }
+    }
+    for (const auto &arg : call->args) {
+      std::string result = GetAddrSpaceOf(arg);
+      if (!result.empty()) return result;
+    }
+  }
+  if (auto *var = ptr_expr.as<VarNode>()) {
+    auto it = alloc_storage_scope_.find(var);
+    if (it != alloc_storage_scope_.end()) {
+      const std::string &scope = it->second;
+      if (scope == "shared" || scope == "shared.dyn") return "threadgroup";
+      if (scope == "local" || scope == "metal.cooperative_tensor") return "thread";
+      if (scope == "global") return "device";
+    }
+  }
+  return "thread";
+}
+
 void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
                                       std::ostream &os) { // NOLINT(*)
   CHECK(!op->op.as<GlobalVarNode>())
@@ -459,32 +582,143 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
        << PrintExpr(op->args[6]) << "[" << PrintExpr(op->args[7]) << "])";
   } else if (op->op.same_as(builtin::cooperative_tensor_fill())) {
     ICHECK_EQ(op->args.size(), 5);
-    Var var = Downcast<Var>(op->args[0]);
-    auto it = cooperative_tensor_dtype_.find(var.get());
-    ICHECK(it != cooperative_tensor_dtype_.end())
-        << "Cannot find variable allocation for cooperative_tensor: " << var;
-    const std::string &dtype_str = it->second;
-    os << PrintExpr(var) << "[" << PrintExpr(op->args[1])
-       << "] = make_filled_simdgroup_matrix<" << dtype_str << ", "
-       << PrintExpr(op->args[3]) << ", " << PrintExpr(op->args[4]) << ">("
-       << PrintExpr(op->args[2]) << ")";
+    std::string var = PrintExpr(op->args[0]);
+    std::string idx = PrintExpr(op->args[1]);
+    std::string val = PrintExpr(op->args[2]);
+    int rows = op->args[3].as<IntImmNode>()->value;
+    int cols = op->args[4].as<IntImmNode>()->value;
+    int elems_per_tile = rows * cols / 32;
+    os << "for (ushort __i = 0; __i < " << elems_per_tile << "; __i++) "
+       << var << "[" << idx << " * " << elems_per_tile << " + __i] = " << val;
   } else if (op->op.same_as(builtin::cooperative_tensor_load())) {
-    ICHECK_EQ(op->args.size(), 7);
-    os << "simdgroup_load(" << PrintExpr(op->args[0]) << "["
-       << PrintExpr(op->args[1]) << "], " << PrintExpr(op->args[2]) << ", "
-       << PrintExpr(op->args[3]) << ", 0, " << PrintExpr(op->args[6]) << ")";
+    ICHECK_GE(op->args.size(), 11);
+    std::string var = PrintExpr(op->args[0]);
+    std::string idx = PrintExpr(op->args[1]);
+    std::string src_ptr = PrintExpr(op->args[2]);
+    std::string stride = PrintExpr(op->args[3]);
+    int rows = op->args[4].as<IntImmNode>()->value;
+    int cols = op->args[5].as<IntImmNode>()->value;
+    Var v = Downcast<Var>(op->args[0]);
+    auto it = cooperative_tensor_dtype_.find(v.get());
+    ICHECK(it != cooperative_tensor_dtype_.end());
+    std::string dtype = it->second;
+    std::string addr_space = GetAddrSpaceOf(op->args[2]);
+    int frag_rows = 16, frag_cols = 16;
+    int nfrag_r = rows / frag_rows;
+    int nfrag_c = cols / frag_cols;
+    os << "{ "
+       << "const ushort __lane = ((uint)threadIdx.x) % 32; "
+       << "const ushort __qid = __lane >> 2; "
+       << "const ushort __base_row = (__qid & 4) | ((__lane >> 1) & 3); "
+       << "const ushort __base_col = ((__qid & 2) | (__lane & 1)) * 4; "
+       << addr_space << " " << dtype << "* __src = (" << addr_space << " " << dtype << "*)" << src_ptr << "; ";
+    int operand_role = op->args[10].as<IntImmNode>()->value;
+    int elem_offset = 0;
+    for (int fr = 0; fr < nfrag_r; fr++) {
+      for (int fc = 0; fc < nfrag_c; fc++) {
+        int row_off = fr * frag_rows;
+        int col_off = fc * frag_cols;
+        os << "for (ushort __i = 0; __i < 8; __i++) { "
+           << "ushort __r = __base_row + (__i >> 2) * 8 + " << row_off << "; "
+           << "ushort __c = __base_col + (__i & 3) + " << col_off << "; ";
+        os << var << "[" << idx << " * " << (nfrag_r * nfrag_c * 8) << " + "
+           << elem_offset << " + __i] = "
+           << "__src[__r * " << stride << " + __c]; } ";
+        elem_offset += 8;
+      }
+    }
+    os << "}";
   } else if (op->op.same_as(builtin::cooperative_tensor_store())) {
-    ICHECK_EQ(op->args.size(), 7);
-    os << "simdgroup_store(" << PrintExpr(op->args[0]) << "["
-       << PrintExpr(op->args[1]) << "], " << PrintExpr(op->args[2]) << ", "
-       << PrintExpr(op->args[3]) << ", 0, " << PrintExpr(op->args[6]) << ")";
+    ICHECK_GE(op->args.size(), 11);
+    std::string var = PrintExpr(op->args[0]);
+    std::string idx = PrintExpr(op->args[1]);
+    std::string dst_ptr = PrintExpr(op->args[2]);
+    std::string stride = PrintExpr(op->args[3]);
+    int rows = op->args[4].as<IntImmNode>()->value;
+    int cols = op->args[5].as<IntImmNode>()->value;
+    Var v = Downcast<Var>(op->args[0]);
+    auto it = cooperative_tensor_dtype_.find(v.get());
+    ICHECK(it != cooperative_tensor_dtype_.end());
+    std::string dtype = it->second;
+    std::string addr_space = GetAddrSpaceOf(op->args[2]);
+    int frag_rows = 16, frag_cols = 16;
+    int nfrag_r = rows / frag_rows;
+    int nfrag_c = cols / frag_cols;
+    os << "{ "
+       << "const ushort __lane = ((uint)threadIdx.x) % 32; "
+       << "const ushort __qid = __lane >> 2; "
+       << "const ushort __base_row = (__qid & 4) | ((__lane >> 1) & 3); "
+       << "const ushort __base_col = ((__qid & 2) | (__lane & 1)) * 4; "
+       << addr_space << " " << dtype << "* __dst = (" << addr_space << " " << dtype << "*)" << dst_ptr << "; ";
+    int elem_offset = 0;
+    for (int fr = 0; fr < nfrag_r; fr++) {
+      for (int fc = 0; fc < nfrag_c; fc++) {
+        int row_off = fr * frag_rows;
+        int col_off = fc * frag_cols;
+        os << "for (ushort __i = 0; __i < 8; __i++) { "
+           << "ushort __r = __base_row + (__i >> 2) * 8 + " << row_off << "; "
+           << "ushort __c = __base_col + (__i & 3) + " << col_off << "; "
+           << "__dst[__r * " << stride << " + __c] = "
+           << var << "[" << idx << " * " << (nfrag_r * nfrag_c * 8) << " + "
+           << elem_offset << " + __i]; } ";
+        elem_offset += 8;
+      }
+    }
+    os << "}";
   } else if (op->op.same_as(builtin::cooperative_tensor_multiply_accumulate())) {
-    ICHECK_GE(op->args.size(), 8);
-    os << "simdgroup_multiply_accumulate("
-       << PrintExpr(op->args[0]) << "[" << PrintExpr(op->args[1]) << "], "
-       << PrintExpr(op->args[2]) << "[" << PrintExpr(op->args[3]) << "], "
-       << PrintExpr(op->args[4]) << "[" << PrintExpr(op->args[5]) << "], "
-       << PrintExpr(op->args[6]) << "[" << PrintExpr(op->args[7]) << "])";
+    ICHECK_GE(op->args.size(), 13);
+    int M = op->args[8].as<IntImmNode>()->value;
+    int N = op->args[9].as<IntImmNode>()->value;
+    int K = op->args[10].as<IntImmNode>()->value;
+    bool trans_a = op->args[11].as<IntImmNode>()->value != 0;
+    bool trans_b = op->args[12].as<IntImmNode>()->value != 0;
+
+    std::string a_var = PrintExpr(op->args[2]);
+    std::string a_idx = PrintExpr(op->args[3]);
+    std::string b_var = PrintExpr(op->args[4]);
+    std::string b_idx = PrintExpr(op->args[5]);
+    std::string c_var = PrintExpr(op->args[0]);
+    std::string c_idx = PrintExpr(op->args[1]);
+
+    Var a_v = Downcast<Var>(op->args[2]);
+    Var c_v = Downcast<Var>(op->args[0]);
+    auto a_it = cooperative_tensor_dtype_.find(a_v.get());
+    auto c_it = cooperative_tensor_dtype_.find(c_v.get());
+    ICHECK(a_it != cooperative_tensor_dtype_.end());
+    ICHECK(c_it != cooperative_tensor_dtype_.end());
+    std::string a_dtype = a_it->second;
+    std::string c_dtype = c_it->second;
+
+    int a_elems = M * K / 32;
+    int b_elems = K * N / 32;
+    int c_elems = M * N / 32;
+
+    ICHECK(M == 32 || N == 32 || K == 32)
+        << "MPP matmul2d requires at least one of M, N, K to be 32, got "
+        << M << "x" << N << "x" << K;
+
+    os << "{ "
+       << "constexpr auto __desc = mpp::tensor_ops::matmul2d_descriptor("
+       << M << ", " << N << ", " << K << ", "
+       << (trans_a ? "true" : "false") << ", "
+       << (trans_b ? "true" : "false") << ", true, "
+       << "mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate); "
+       << "mpp::tensor_ops::matmul2d<__desc, metal::execution_simdgroup> __op; "
+       << "auto __ct_a = __op.get_left_input_cooperative_tensor<"
+       << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
+       << "auto __ct_b = __op.get_right_input_cooperative_tensor<"
+       << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
+       << "auto __ct_c = __op.get_destination_cooperative_tensor<"
+       << "decltype(__ct_a), decltype(__ct_b), " << c_dtype << ">(); "
+       << "for (ushort __i = 0; __i < " << a_elems << "; __i++) "
+       << "__ct_a[__i] = " << a_var << "[" << a_idx << " * " << a_elems << " + __i]; "
+       << "for (ushort __i = 0; __i < " << b_elems << "; __i++) "
+       << "__ct_b[__i] = " << b_var << "[" << b_idx << " * " << b_elems << " + __i]; "
+       << "for (ushort __i = 0; __i < " << c_elems << "; __i++) "
+       << "__ct_c[__i] = " << c_var << "[" << c_idx << " * " << c_elems << " + __i]; "
+       << "__op.run(__ct_a, __ct_b, __ct_c); "
+       << "for (ushort __i = 0; __i < " << c_elems << "; __i++) "
+       << c_var << "[" << c_idx << " * " << c_elems << " + __i] = __ct_c[__i]; }";
   } else if (op->op.same_as(builtin::reinterpret())) {
     // generate as_type<TYPE>(ARG)
     os << "(as_type<";

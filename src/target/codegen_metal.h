@@ -63,6 +63,10 @@ public:
   using CodeGenC::PrintType;
 
 private:
+  // Return Metal address space qualifier ("thread", "threadgroup", "device")
+  // for a pointer expression (typically from address_of(BufferLoad(...))).
+  std::string GetAddrSpaceOf(const PrimExpr &ptr_expr) const;
+
   std::unordered_map<const VarNode *, std::string> simdgroup_dtype_;
   std::unordered_map<const VarNode *, std::string> cooperative_tensor_dtype_;
   int thread_index_bits_{32};
