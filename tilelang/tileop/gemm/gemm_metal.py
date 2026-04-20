@@ -82,7 +82,12 @@ class GemmMetal(GemmBase):
         warp_cols = mps_emitter.warp_cols
         num_simd_c = warp_rows * warp_cols
         block_K = mps_emitter.chunk
+        micro_size_x = mps_emitter.micro_size_x
+        micro_size_y = mps_emitter.micro_size_y
         micro_size_k = mps_emitter.micro_size_k
+        a_tile_elems = micro_size_x * micro_size_k
+        b_tile_elems = micro_size_k * micro_size_y
+        c_tile_elems = micro_size_x * micro_size_y
 
         A_region = self.ARegion
         B_region = self.BRegion
@@ -100,11 +105,11 @@ class GemmMetal(GemmBase):
 
                 @T.prim_func
                 def _gemm_cooperative_tensor() -> None:
-                    A_local = T.alloc_local((warp_rows * 512), in_dtype, scope="metal.cooperative_tensor")
-                    B_local = T.alloc_local((warp_cols * 512), in_dtype, scope="metal.cooperative_tensor")
+                    A_local = T.alloc_local((warp_rows * a_tile_elems), in_dtype, scope="metal.cooperative_tensor")
+                    B_local = T.alloc_local((warp_cols * b_tile_elems), in_dtype, scope="metal.cooperative_tensor")
                     if clear_accum:
                         for _i in T.serial(num_simd_c):
-                            T.cooperative_tensor_fill(C_buf.data, _i, T.cast(0, accum_dtype), 16, 16)
+                            T.cooperative_tensor_fill(C_buf.data, _i, T.cast(0, accum_dtype), micro_size_x, micro_size_y)
                     for ki in T.serial(0, (block_K // micro_size_k)):
                         mps_emitter.ldmatrix_a(A_local, A_region, ki)
                         mps_emitter.ldmatrix_b(B_local, B_region, ki)
@@ -115,12 +120,12 @@ class GemmMetal(GemmBase):
 
                 @T.prim_func
                 def _gemm_with_c_writeback() -> None:
-                    A_local = T.alloc_local((warp_rows * 512), in_dtype, scope="metal.cooperative_tensor")
-                    B_local = T.alloc_local((warp_cols * 512), in_dtype, scope="metal.cooperative_tensor")
-                    C_ct = T.alloc_local((num_simd_c * 256), accum_dtype, scope="metal.cooperative_tensor")
+                    A_local = T.alloc_local((warp_rows * a_tile_elems), in_dtype, scope="metal.cooperative_tensor")
+                    B_local = T.alloc_local((warp_cols * b_tile_elems), in_dtype, scope="metal.cooperative_tensor")
+                    C_ct = T.alloc_local((num_simd_c * c_tile_elems), accum_dtype, scope="metal.cooperative_tensor")
                     if clear_accum:
                         for _i in T.serial(num_simd_c):
-                            T.cooperative_tensor_fill(C_ct.data, _i, T.cast(0, accum_dtype), 16, 16)
+                            T.cooperative_tensor_fill(C_ct.data, _i, T.cast(0, accum_dtype), micro_size_x, micro_size_y)
                     else:
                         mps_emitter.simd_load(C_ct, C_buf)
                     for ki in T.serial(0, (block_K // micro_size_k)):

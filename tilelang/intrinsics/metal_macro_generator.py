@@ -63,8 +63,8 @@ class MPSIntrinEmitter:
         self.b_stride_override = b_stride_override
 
         self.micro_size_x = 16
-        self.micro_size_y = 16
-        self.micro_size_k = 32
+        self.micro_size_y = 32
+        self.micro_size_k = 16
 
         self.warp_rows = warp_row_tiles // self.micro_size_x
         self.warp_cols = warp_col_tiles // self.micro_size_y

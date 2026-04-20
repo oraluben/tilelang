@@ -19,7 +19,8 @@ def matmul_gemm_v2(M, N, K, block_M, block_N, block_K, dtype=T.float16, accum_dt
         B: T.Tensor((K, N), dtype),
         C: T.Tensor((M, N), accum_dtype),
     ):
-        with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
+        num_threads = max(32, (block_M // 16) * (block_N // 32) * 32)
+        with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=num_threads) as (bx, by):
             A_shared = T.alloc_shared((block_M, block_K), dtype, scope="shared")
             B_shared = T.alloc_shared((block_K, block_N), dtype, scope="shared")
             C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
@@ -67,18 +68,28 @@ def assert_gemm_v2(
 
 
 @tilelang.testing.requires_metal
-def test_gemm_v2_32x32x32():
-    assert_gemm_v2(128, 128, 128, 32, 32, 32)
+def test_gemm_v2_16x32x16():
+    assert_gemm_v2(128, 128, 128, 16, 32, 16)
 
 
 @tilelang.testing.requires_metal
-def test_gemm_v2_64x64x32():
-    assert_gemm_v2(128, 128, 128, 64, 64, 32)
+def test_gemm_v2_16x64x16():
+    assert_gemm_v2(128, 128, 128, 16, 64, 16)
+
+
+@tilelang.testing.requires_metal
+def test_gemm_v2_32x64x16():
+    assert_gemm_v2(128, 128, 128, 32, 64, 16)
+
+
+@tilelang.testing.requires_metal
+def test_gemm_v2_64x64x16():
+    assert_gemm_v2(128, 128, 128, 64, 64, 16)
 
 
 @tilelang.testing.requires_metal
 def test_gemm_v2_1024():
-    assert_gemm_v2(1024, 1024, 1024, 64, 64, 32, atol=1.0)
+    assert_gemm_v2(1024, 1024, 1024, 64, 64, 16, atol=1.0)
 
 
 if __name__ == "__main__":

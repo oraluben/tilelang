@@ -160,11 +160,14 @@ Stmt FillNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     int region_elements = 1;
     for (auto r : region) {
       auto imm = r->extent.as<IntImmNode>();
-      ICHECK(imm) << "cooperative_tensor fill region must have constant extents";
+      ICHECK(imm)
+          << "cooperative_tensor fill region must have constant extents";
       region_elements *= imm->value;
     }
     int total_elements = region_elements;
-    int tile_elems = 256;
+    int kTileM = 16;
+    int kTileN = 32;
+    int tile_elems = kTileM * kTileN;
     ICHECK(total_elements % tile_elems == 0)
         << "cooperative_tensor buffer size must be multiple of " << tile_elems
         << ", got " << total_elements;
@@ -172,10 +175,11 @@ Stmt FillNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     PrimExpr fill_value = Cast(dst->dtype, value);
     Array<Stmt> stmts;
     for (int i = 0; i < num_tiles; i++) {
-      stmts.push_back(Evaluate(
-          Call(DataType::Handle(), builtin::cooperative_tensor_fill(),
-               {dst->data, IntImm(DataType::Int(32), i), fill_value,
-                IntImm(DataType::Int(32), 16), IntImm(DataType::Int(32), 16)})));
+      stmts.push_back(Evaluate(Call(
+          DataType::Handle(), builtin::cooperative_tensor_fill(),
+          {dst->data, IntImm(DataType::Int(32), i), fill_value,
+           IntImm(DataType::Int(32), kTileM),
+           IntImm(DataType::Int(32), kTileN)})));
     }
     if (stmts.size() == 1)
       return stmts[0];

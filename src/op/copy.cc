@@ -1113,14 +1113,33 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
     }
   }
 
-  ICHECK(M >= m_warp * kTileSize && N >= n_warp * kTileSize)
+  int elems_per_thread = total_elements / (num_warps * warp_size);
+  int warp_M = M / m_warp;
+  int warp_N = N / n_warp;
+  int warp_tiles = elems_per_thread / (kTileSize * kTileSize / warp_size);
+
+  int kTileN = warp_N;
+  int kTileM = kTileSize;
+  if (warp_tiles > 0 && warp_M > kTileSize) {
+    kTileN = warp_N;
+    kTileM = kTileSize;
+  }
+  if (kTileN > warp_N) kTileN = warp_N;
+
+  int warp_row_tiles = warp_M / kTileM;
+  int warp_col_tiles = warp_N / kTileN;
+
+  ICHECK(warp_row_tiles > 0 && warp_col_tiles > 0)
       << "Cannot partition " << M << "x" << N << " matrix across " << m_warp
-      << "x" << n_warp << " warps with " << kTileSize << "x" << kTileSize << " tiles";
-  int warp_row_tiles = M / m_warp / kTileSize;
-  int warp_col_tiles = N / n_warp / kTileSize;
-  ICHECK(warp_row_tiles > 0 && warp_col_tiles > 0);
-  ICHECK(warp_row_tiles * warp_col_tiles * tile_elems <= total_elements)
-      << "Warp partition produces more tiles than buffer capacity";
+      << "x" << n_warp << " warps";
+
+  int tile_elems_per_thread = kTileM * kTileN / warp_size;
+  ICHECK(warp_row_tiles * warp_col_tiles * tile_elems_per_thread == elems_per_thread)
+      << "Tile partition inconsistent with buffer size: "
+      << warp_row_tiles << "x" << warp_col_tiles << " tiles of "
+      << kTileM << "x" << kTileN << " = "
+      << warp_row_tiles * warp_col_tiles * tile_elems_per_thread
+      << " elems/thread, expected " << elems_per_thread;
 
   PrimExpr warp_m = FloorMod(warp_id, m_warp);
   PrimExpr warp_n = FloorDiv(warp_id, m_warp);
@@ -1129,19 +1148,22 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
   for (int i = 0; i < warp_row_tiles; i++) {
     for (int j = 0; j < warp_col_tiles; j++) {
       int tile_idx = i * warp_col_tiles + j;
-      PrimExpr row = dst_row_base + warp_m * (warp_row_tiles * kTileSize) + i * kTileSize;
-      PrimExpr col = dst_col_base + warp_n * (warp_col_tiles * kTileSize) + j * kTileSize;
+      PrimExpr row =
+          dst_row_base + warp_m * warp_M + i * kTileM;
+      PrimExpr col =
+          dst_col_base + warp_n * warp_N + j * kTileN;
       PrimExpr ptr = Call(DataType::Handle(), builtin::address_of(),
                           {BufferLoad(dst, {row, col})});
-      int kMMAK = 32;
-      stmts.push_back(Evaluate(
-          Call(DataType::Handle(), builtin::cooperative_tensor_store(),
-               {src->data, IntImm(DataType::Int(32), tile_idx), ptr, dst_stride,
-                IntImm(DataType::Int(32), kTileSize), IntImm(DataType::Int(32), kTileSize),
-                Cast(DataType::Bool(), IntImm(DataType::Int(32), 0)),
-                IntImm(DataType::Int(32), kTileSize), IntImm(DataType::Int(32), kTileSize),
-                IntImm(DataType::Int(32), kMMAK),
-                IntImm(DataType::Int(32), 2)})));
+      int kMMAK = kTileSize;
+      stmts.push_back(Evaluate(Call(
+          DataType::Handle(), builtin::cooperative_tensor_store(),
+          {src->data, IntImm(DataType::Int(32), tile_idx), ptr, dst_stride,
+           IntImm(DataType::Int(32), kTileM),
+           IntImm(DataType::Int(32), kTileN),
+           Cast(DataType::Bool(), IntImm(DataType::Int(32), 0)),
+           IntImm(DataType::Int(32), kTileM),
+           IntImm(DataType::Int(32), kTileN),
+           IntImm(DataType::Int(32), kMMAK), IntImm(DataType::Int(32), 2)})));
     }
   }
   if (stmts.size() == 1)
