@@ -45,6 +45,8 @@ class MPSIntrinEmitter:
         warp_col_tiles: int = 8,
         chunk: int = 32,
         thread_var: tir.Var | None = None,
+        a_stride_override: int | None = None,
+        b_stride_override: int | None = None,
     ):
         self.a_dtype = a_dtype
         self.b_dtype = b_dtype
@@ -57,6 +59,8 @@ class MPSIntrinEmitter:
         self.warp_col_tiles = warp_col_tiles
         self.chunk = chunk
         self.thread_var = thread_var
+        self.a_stride_override = a_stride_override
+        self.b_stride_override = b_stride_override
 
         self.micro_size_x = 16
         self.micro_size_y = 16
@@ -93,7 +97,10 @@ class MPSIntrinEmitter:
             buffer = buf
             off_row = 0
             off_col = 0
-        stride = buffer.shape[-1]
+        if buffer.strides and len(buffer.strides) >= 2:
+            stride = buffer.strides[-2]
+        else:
+            stride = buffer.shape[-1]
         return buffer, off_row, off_col, stride
 
     def ldmatrix_a(self, A_local_buf, A_shared_buf: Buffer | BufferRegion, ki):
@@ -106,6 +113,8 @@ class MPSIntrinEmitter:
         warp_m, _ = self._get_warp_indices()
 
         buffer, offset_m, offset_k, stride = self._parse_buffer_2d(A_shared_buf)
+        if self.a_stride_override is not None:
+            stride = self.a_stride_override
 
         @T.macro
         def _warp_ldmatrix_a(A_local_buf, buffer, offset_m, offset_k, stride, warp_m, ki):
@@ -145,6 +154,8 @@ class MPSIntrinEmitter:
         _, warp_n = self._get_warp_indices()
 
         buffer, offset_k, offset_n, stride = self._parse_buffer_2d(B_shared_buf)
+        if self.b_stride_override is not None:
+            stride = self.b_stride_override
 
         @T.macro
         def _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n, ki):

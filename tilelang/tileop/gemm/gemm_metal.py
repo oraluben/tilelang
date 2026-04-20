@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .gemm_base import GemmBase
 from .inst import GemmInst
+from tilelang.layout import Layout, make_linear_layout
 from tilelang.utils.language import is_shared, is_full_region, is_metal_cooperative_tensor, is_fragment
 from tilelang import tvm as tvm
 from tvm.target import Target
@@ -11,12 +12,37 @@ from tilelang import language as T
 from tilelang.transform.simplify import _Simplify
 
 
+def _make_padded_layout(buffer):
+    shape = buffer.shape
+    stride = int(shape[-2])
+    continuous = int(shape[-1])
+    element_bits = int(tvm.DataType(buffer.dtype).bits)
+    padded = continuous
+    if (element_bits * continuous) % 256 == 0:
+        padded += 128 // element_bits
+    return Layout([stride, continuous], lambda i, j: i * padded + j)
+
+
 class GemmMetal(GemmBase):
     def is_gemm_ss(self) -> bool:
         return is_shared(self.A) and is_shared(self.B)
 
     def infer_layout(self, target: Target, thread_nums: int):
+        if self.is_gemm_ss():
+            return {
+                self.A: make_linear_layout(self.A),
+                self.B: make_linear_layout(self.B),
+            }
         return {}
+
+    @staticmethod
+    def _get_padded_stride(buffer):
+        continuous = int(buffer.shape[-1])
+        element_bits = int(tvm.DataType(buffer.dtype).bits)
+        padded = continuous
+        if (element_bits * continuous) % 256 == 0:
+            padded += 128 // element_bits
+        return padded
 
     def lower(
         self, layout_map: dict, target: Target, thread_bounds: Range, thread_var: tir.Var, mbar_phase_expr: tir.PrimExpr | None = None
@@ -27,6 +53,9 @@ class GemmMetal(GemmBase):
         warp_col_tiles = int(self.N // n_warp)
 
         from tilelang.intrinsics.metal_macro_generator import MPSIntrinEmitter
+
+        a_stride = None
+        b_stride = None
 
         mps_emitter = MPSIntrinEmitter(
             a_dtype=self.in_dtype,
@@ -40,6 +69,8 @@ class GemmMetal(GemmBase):
             warp_col_tiles=warp_col_tiles,
             chunk=self.chunk,
             thread_var=thread_var,
+            a_stride_override=a_stride,
+            b_stride_override=b_stride,
         )
 
         in_dtype = self.in_dtype
