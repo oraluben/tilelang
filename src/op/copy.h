@@ -28,7 +28,8 @@ enum class CopyInst : uint8_t {
   kBulkStore1D = 7,     // utilize tma store 1d
   kTMemLoad = 8,        // tcgen05.ld (tensor memory -> register)
   kTMemStore = 9,       // tcgen05.st (register -> tensor memory)
-  kMetalSIMDGroup = 10, // Metal simdgroup load/store
+  kMetalSIMDGroup = 10,          // Metal simdgroup load/store
+  kMetalCooperativeTensor = 11,  // Metal cooperative_tensor store
 };
 
 /// Convert CopyInst enum to string for debugging
@@ -56,6 +57,8 @@ inline const char *CopyInstToString(CopyInst inst) {
     return "TMemStore";
   case CopyInst::kMetalSIMDGroup:
     return "MetalSIMDGroup";
+  case CopyInst::kMetalCooperativeTensor:
+    return "MetalCooperativeTensor";
   default:
     return "Unknown";
   }
@@ -297,6 +300,7 @@ protected:
    * \brief Check if copy from Metal simdgroup to shared/global is supported.
    */
   bool CheckSIMDGroupCopy(Target target) const;
+  bool CheckCooperativeTensorCopy(Target target) const;
 
   /*!
    * \brief Get the copy instruction type.
@@ -343,6 +347,7 @@ protected:
    * \brief Generate lowering for simdgroup store.
    */
   Stmt LowerSIMDGroupCopy(const LowerArgs &T, arith::Analyzer *analyzer) const;
+  Stmt LowerCooperativeTensorCopy(const LowerArgs &T, arith::Analyzer *analyzer) const;
 
   /*!
    * \brief Generate SIMT (thread-level) loop for copying.

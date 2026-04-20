@@ -64,6 +64,7 @@ public:
 
 private:
   std::unordered_map<const VarNode *, std::string> simdgroup_dtype_;
+  std::unordered_map<const VarNode *, std::string> cooperative_tensor_dtype_;
   int thread_index_bits_{32};
   int thread_work_dim_{0};
   Target target_;

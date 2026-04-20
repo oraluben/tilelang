@@ -445,6 +445,9 @@ public:
               << " can not be inferred correctly.";
         }
       }
+      if (IsCooperativeTensorBuffer(buffer)) {
+        continue;
+      }
     }
 
     // Collect layout info for For nodes

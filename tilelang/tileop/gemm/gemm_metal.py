@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .gemm_base import GemmBase
 from .inst import GemmInst
-from tilelang.utils.language import is_shared, is_full_region, is_metal_simdgroup, is_fragment
+from tilelang.utils.language import is_shared, is_full_region, is_metal_cooperative_tensor, is_fragment
 from tilelang import tvm as tvm
 from tvm.target import Target
 from tvm.ir import Range
@@ -57,48 +57,48 @@ class GemmMetal(GemmBase):
         C_buf = C_region.buffer
 
         clear_accum = self.clear_accum
-        c_in_simdgroup_reg = is_metal_simdgroup(C_buf) or is_fragment(C_buf)
+        c_in_cooperative_tensor = is_metal_cooperative_tensor(C_buf) or is_fragment(C_buf)
 
         assert block_K >= micro_size_k, f"block_K ({block_K}) must be >= micro_size_k ({micro_size_k})"
         assert is_full_region(C_region), "Fragment output C must be a full region"
-        assert c_in_simdgroup_reg or is_shared(C_buf), (
-            f"Metal GEMM requires C in local.fragment, metal.simdgroup, or shared scope, got {C_buf.scope()}"
+        assert c_in_cooperative_tensor or is_shared(C_buf), (
+            f"Metal GEMM requires C in local.fragment, metal.cooperative_tensor, or shared scope, got {C_buf.scope()}"
         )
 
         if self.is_gemm_ss():
-            if c_in_simdgroup_reg:
+            if c_in_cooperative_tensor:
 
                 @T.prim_func
-                def _gemm_ss_simdgroup() -> None:
-                    A_local = T.alloc_local((warp_rows * 64), in_dtype, scope="metal.simdgroup")
-                    B_local = T.alloc_local((warp_cols * 64), in_dtype, scope="metal.simdgroup")
+                def _gemm_ss_cooperative_tensor() -> None:
+                    A_local = T.alloc_local((warp_rows * 64), in_dtype, scope="metal.cooperative_tensor")
+                    B_local = T.alloc_local((warp_cols * 64), in_dtype, scope="metal.cooperative_tensor")
                     if clear_accum:
                         for _i in T.serial(num_simd_c):
-                            T.make_filled_simdgroup_matrix(C_buf.data, _i, T.cast(0, accum_dtype))
+                            T.cooperative_tensor_fill(C_buf.data, _i, T.cast(0, accum_dtype))
                     for ki in T.serial(0, (block_K // micro_size_k)):
                         mps_emitter.ldmatrix_a(A_local, A_region, ki)
                         mps_emitter.ldmatrix_b(B_local, B_region, ki)
                         mps_emitter.mma(A_local, B_local, C_buf)
 
-                return _Simplify(_gemm_ss_simdgroup, inline_let=True)
+                return _Simplify(_gemm_ss_cooperative_tensor, inline_let=True)
             else:
 
                 @T.prim_func
                 def _gemm_ss_shared() -> None:
-                    A_local = T.alloc_local((warp_rows * 64), in_dtype, scope="metal.simdgroup")
-                    B_local = T.alloc_local((warp_cols * 64), in_dtype, scope="metal.simdgroup")
-                    C_simd = T.alloc_local((num_simd_c * 64), accum_dtype, scope="metal.simdgroup")
+                    A_local = T.alloc_local((warp_rows * 64), in_dtype, scope="metal.cooperative_tensor")
+                    B_local = T.alloc_local((warp_cols * 64), in_dtype, scope="metal.cooperative_tensor")
+                    C_ct = T.alloc_local((num_simd_c * 64), accum_dtype, scope="metal.cooperative_tensor")
                     if clear_accum:
                         for _i in T.serial(num_simd_c):
-                            T.make_filled_simdgroup_matrix(C_simd.data, _i, T.cast(0, accum_dtype))
+                            T.cooperative_tensor_fill(C_ct.data, _i, T.cast(0, accum_dtype))
                     else:
-                        mps_emitter.simd_load(C_simd, C_buf)
+                        mps_emitter.simd_load(C_ct, C_buf)
                     for ki in T.serial(0, (block_K // micro_size_k)):
                         mps_emitter.ldmatrix_a(A_local, A_region, ki)
                         mps_emitter.ldmatrix_b(B_local, B_region, ki)
-                        mps_emitter.mma(A_local, B_local, C_simd)
+                        mps_emitter.mma(A_local, B_local, C_ct)
 
-                    mps_emitter.simd_store(C_simd, C_buf)
+                    mps_emitter.simd_store(C_ct, C_buf)
 
                 return _Simplify(_gemm_ss_shared, inline_let=True)
         else:

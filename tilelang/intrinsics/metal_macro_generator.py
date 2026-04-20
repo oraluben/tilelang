@@ -34,12 +34,10 @@ class MPSIntrinEmitter:
         self.chunk = chunk
         self.thread_var = thread_var
 
-        # Metal simdgroup matrix size (always 8x8)
         self.micro_size_x = 8
         self.micro_size_y = 8
         self.micro_size_k = 8
 
-        # Number of 8x8 tiles per warp
         self.warp_rows = warp_row_tiles // self.micro_size_x
         self.warp_cols = warp_col_tiles // self.micro_size_y
 
@@ -63,7 +61,6 @@ class MPSIntrinEmitter:
 
     @staticmethod
     def _parse_buffer_2d(buf):
-        """Extract (buffer, row_offset, col_offset, stride) from Buffer or BufferRegion."""
         if isinstance(buf, BufferRegion):
             buffer = buf.buffer
             off_row = buf.region[-2].min
@@ -97,7 +94,7 @@ class MPSIntrinEmitter:
 
                 ptr = T.access_ptr(buffer[row_idx, col_idx], "r")
 
-                T.simdgroup_load(
+                T.cooperative_tensor_load(
                     A_local_buf.data,
                     i,
                     ptr,
@@ -131,7 +128,7 @@ class MPSIntrinEmitter:
 
                 ptr = T.access_ptr(buffer[row_idx, col_idx], "r")
 
-                T.simdgroup_load(
+                T.cooperative_tensor_load(
                     B_local_buf.data,
                     j,
                     ptr,
@@ -150,7 +147,7 @@ class MPSIntrinEmitter:
         @T.macro
         def _warp_mma(A_local_buf, B_local_buf, C_local_buf):
             for i, j in T.grid(warp_rows, warp_cols):
-                T.simdgroup_multiply_accumulate(
+                T.cooperative_tensor_multiply_accumulate(
                     C_local_buf.data,
                     i * warp_cols + j,
                     A_local_buf.data,
@@ -159,6 +156,11 @@ class MPSIntrinEmitter:
                     j,
                     C_local_buf.data,
                     i * warp_cols + j,
+                    self.micro_size_x,
+                    self.micro_size_y,
+                    self.micro_size_k,
+                    T.bool(self.a_transposed),
+                    T.bool(self.b_transposed),
                 )
 
         return _warp_mma(A_local_buf, B_local_buf, C_local_buf)
@@ -173,7 +175,7 @@ class MPSIntrinEmitter:
 
         buffer, offset_m, offset_n, stride = self._parse_buffer_2d(C_dst)
 
-        simd_op = T.simdgroup_store if is_store else T.simdgroup_load
+        ct_op = T.cooperative_tensor_store if is_store else T.cooperative_tensor_load
         access_mode = "w" if is_store else "r"
 
         @T.macro
@@ -184,7 +186,7 @@ class MPSIntrinEmitter:
 
                 index_c = i * warp_cols + j
 
-                simd_op(
+                ct_op(
                     C_simd_buf.data,
                     index_c,
                     T.access_ptr(buffer[row, col], access_mode),

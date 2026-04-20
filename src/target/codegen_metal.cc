@@ -337,7 +337,24 @@ void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
 
   auto scope = GetPtrStorageScope(op->buffer_var);
   alloc_storage_scope_[op->buffer_var.get()] = scope;
-  if (scope == "metal.simdgroup") {
+  if (scope == "metal.cooperative_tensor") {
+    ICHECK(op->dtype == DataType::Float(16) ||
+           op->dtype == DataType::Float(32) ||
+           op->dtype == DataType::BFloat(16))
+        << "Only float16, float32, and bfloat16 are supported for "
+           "cooperative_tensor, but got "
+        << op->dtype;
+    ICHECK(constant_size % 64 == 0)
+        << "cooperative_tensor buffer size must be multiple of 64, got "
+        << constant_size;
+
+    std::ostringstream dtype_os;
+    PrintType(op->dtype, dtype_os);
+    std::string dtype_str = dtype_os.str();
+    cooperative_tensor_dtype_[op->buffer_var.get()] = dtype_str;
+    stream << "simdgroup_" << dtype_str << "8x8 " << vid << '['
+           << constant_size / 64 << "];\n";
+  } else if (scope == "metal.simdgroup") {
     ICHECK(op->dtype == DataType::Float(16) ||
            op->dtype == DataType::Float(32) ||
            op->dtype == DataType::BFloat(16))
@@ -439,6 +456,34 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
        << PrintExpr(op->args[0]) << "[" << PrintExpr(op->args[1]) << "], " //
        << PrintExpr(op->args[2]) << "[" << PrintExpr(op->args[3]) << "], " //
        << PrintExpr(op->args[4]) << "[" << PrintExpr(op->args[5]) << "], " //
+       << PrintExpr(op->args[6]) << "[" << PrintExpr(op->args[7]) << "])";
+  } else if (op->op.same_as(builtin::cooperative_tensor_fill())) {
+    ICHECK_EQ(op->args.size(), 5);
+    Var var = Downcast<Var>(op->args[0]);
+    auto it = cooperative_tensor_dtype_.find(var.get());
+    ICHECK(it != cooperative_tensor_dtype_.end())
+        << "Cannot find variable allocation for cooperative_tensor: " << var;
+    const std::string &dtype_str = it->second;
+    os << PrintExpr(var) << "[" << PrintExpr(op->args[1])
+       << "] = make_filled_simdgroup_matrix<" << dtype_str << ", "
+       << PrintExpr(op->args[3]) << ", " << PrintExpr(op->args[4]) << ">("
+       << PrintExpr(op->args[2]) << ")";
+  } else if (op->op.same_as(builtin::cooperative_tensor_load())) {
+    ICHECK_EQ(op->args.size(), 7);
+    os << "simdgroup_load(" << PrintExpr(op->args[0]) << "["
+       << PrintExpr(op->args[1]) << "], " << PrintExpr(op->args[2]) << ", "
+       << PrintExpr(op->args[3]) << ", 0, " << PrintExpr(op->args[6]) << ")";
+  } else if (op->op.same_as(builtin::cooperative_tensor_store())) {
+    ICHECK_EQ(op->args.size(), 7);
+    os << "simdgroup_store(" << PrintExpr(op->args[0]) << "["
+       << PrintExpr(op->args[1]) << "], " << PrintExpr(op->args[2]) << ", "
+       << PrintExpr(op->args[3]) << ", 0, " << PrintExpr(op->args[6]) << ")";
+  } else if (op->op.same_as(builtin::cooperative_tensor_multiply_accumulate())) {
+    ICHECK_GE(op->args.size(), 8);
+    os << "simdgroup_multiply_accumulate("
+       << PrintExpr(op->args[0]) << "[" << PrintExpr(op->args[1]) << "], "
+       << PrintExpr(op->args[2]) << "[" << PrintExpr(op->args[3]) << "], "
+       << PrintExpr(op->args[4]) << "[" << PrintExpr(op->args[5]) << "], "
        << PrintExpr(op->args[6]) << "[" << PrintExpr(op->args[7]) << "])";
   } else if (op->op.same_as(builtin::reinterpret())) {
     // generate as_type<TYPE>(ARG)

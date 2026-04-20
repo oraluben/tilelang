@@ -1,4 +1,4 @@
-"""Rewrite local.fragment → metal.simdgroup for GEMM accumulators on Metal."""
+"""Rewrite local.fragment → metal.cooperative_tensor for GEMM accumulators on Metal."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def _remap_buffer(buf, var_map):
         buf.dtype,
         buf.name,
         data=new_data,
-        scope="metal.simdgroup",
+        scope="metal.cooperative_tensor",
         data_alignment=buf.data_alignment,
         offset_factor=buf.offset_factor,
     )
@@ -110,8 +110,8 @@ def _rewrite_scope(body, var_map):
     return tir.stmt_functor.ir_transform(body, _pre_order, None, ["tir.Block", "tir.Allocate"])
 
 
-@prim_func_pass(opt_level=0, name="tl.MetalFragmentToSimdgroup")
-class MetalFragmentToSimdgroup:
+@prim_func_pass(opt_level=0, name="tl.MetalFragmentToCooperativeTensor")
+class MetalFragmentToCooperativeTensor:
     def transform_function(self, func: tir.PrimFunc, mod: IRModule, ctx) -> tir.PrimFunc:
         target = func.attrs.get("target", None)
         if target is None or target.kind.name != "metal":
@@ -124,9 +124,13 @@ class MetalFragmentToSimdgroup:
         var_map: dict = {}
         for var in accum_vars:
             ptr_type = var.type_annotation
-            new_ptr = PointerType(ptr_type.element_type, "metal.simdgroup")
+            new_ptr = PointerType(ptr_type.element_type, "metal.cooperative_tensor")
             new_var = tir.Var(var.name, new_ptr)
             var_map[var] = new_var
 
         new_body = _rewrite_scope(func.body, var_map)
         return func.with_body(new_body)
+
+
+# Keep backward-compatible alias
+MetalFragmentToSimdgroup = MetalFragmentToCooperativeTensor
