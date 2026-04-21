@@ -108,12 +108,8 @@ class GemmMetal(GemmBase):
             raise ValueError(f"Unsupported gemm combination, A: {self.A.scope()}, B: {self.B.scope()}")
 
         num_k_iters = block_K // micro_size_k
-        reg_per_thread = (
-            warp_rows * a_tile_elems * 2  # A (fp16)
-            + warp_cols * b_tile_elems * 2  # B (fp16)
-            + num_simd_c * c_tile_elems * 4  # C (fp32)
-        ) // 32  # per-thread bytes
-        use_double_buffer = num_k_iters > 1 and inner_k_steps == 1 and reg_per_thread < 400
+        c_per_thread = num_simd_c * c_tile_elems * 4 // 32
+        use_double_buffer = num_k_iters > 1 and inner_k_steps == 1 and c_per_thread <= 64
 
         if c_in_cooperative_tensor:
             if use_double_buffer:
