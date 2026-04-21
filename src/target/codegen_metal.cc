@@ -131,7 +131,7 @@ namespace codegen {
 
 void CodeGenTileLangMetal::InitFuncState(const PrimFunc &f) {
   CodeGenC::InitFuncState(f);
-  // analyze the data;
+  emitted_frag_lane_vars_ = false;
   for (Var arg : f->params) {
     if (arg.dtype().is_handle()) {
       alloc_storage_scope_[arg.get()] = "global";
@@ -271,6 +271,17 @@ void CodeGenTileLangMetal::AddFunction(const GlobalVar &gvar,
   // the function scope.
   stream << ") {\n";
   int func_scope = this->BeginScope();
+  if (work_dim > 0) {
+    this->PrintIndent();
+    stream << "const ushort __lane = ((uint)threadIdx.x) % 32;\n";
+    this->PrintIndent();
+    stream << "const ushort __qid = __lane >> 2;\n";
+    this->PrintIndent();
+    stream << "const ushort __base_row = (__qid & 4) | ((__lane >> 1) & 3);\n";
+    this->PrintIndent();
+    stream << "const ushort __base_col = ((__qid & 2) | (__lane & 1)) * 4;\n";
+    emitted_frag_lane_vars_ = true;
+  }
   this->PrintStmt(func->body);
   this->EndScope(func_scope);
   this->PrintIndent();
@@ -607,10 +618,6 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
     int nfrag_r = rows / frag_rows;
     int nfrag_c = cols / frag_cols;
     os << "{ "
-       << "const ushort __lane = ((uint)threadIdx.x) % 32; "
-       << "const ushort __qid = __lane >> 2; "
-       << "const ushort __base_row = (__qid & 4) | ((__lane >> 1) & 3); "
-       << "const ushort __base_col = ((__qid & 2) | (__lane & 1)) * 4; "
        << addr_space << " " << dtype << "* __src = (" << addr_space << " " << dtype << "*)" << src_ptr << "; ";
     int operand_role = op->args[10].as<IntImmNode>()->value;
     int elem_offset = 0;
@@ -645,10 +652,6 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
     int nfrag_r = rows / frag_rows;
     int nfrag_c = cols / frag_cols;
     os << "{ "
-       << "const ushort __lane = ((uint)threadIdx.x) % 32; "
-       << "const ushort __qid = __lane >> 2; "
-       << "const ushort __base_row = (__qid & 4) | ((__lane >> 1) & 3); "
-       << "const ushort __base_col = ((__qid & 2) | (__lane & 1)) * 4; "
        << addr_space << " " << dtype << "* __dst = (" << addr_space << " " << dtype << "*)" << dst_ptr << "; ";
     int elem_offset = 0;
     for (int fr = 0; fr < nfrag_r; fr++) {
