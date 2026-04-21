@@ -49,13 +49,17 @@ def _collect_fragment_gemm_accum_vars(body: tir.Stmt) -> set:
     return accum_vars
 
 
-def _remap_buffer(buf, var_map):
+def _remap_buffer(buf, var_map, num_warps=1):
     old_data = buf.data
     new_data = var_map.get(old_data, None)
     if new_data is None:
         return buf
+    total = 1
+    for s in buf.shape:
+        total *= s.value if isinstance(s, tir.IntImm) else s
+    new_total = total // num_warps if num_warps > 1 else total
     return tir.decl_buffer(
-        buf.shape,
+        [tir.IntImm("int32", new_total)],
         buf.dtype,
         buf.name,
         data=new_data,
@@ -65,7 +69,7 @@ def _remap_buffer(buf, var_map):
     )
 
 
-def _rewrite_scope(body, var_map):
+def _rewrite_scope(body, var_map, num_warps=1):
     buf_map = {}
 
     def _pre_order(stmt):
@@ -73,7 +77,7 @@ def _rewrite_scope(body, var_map):
             new_alloc_bufs = []
             changed = False
             for buf in stmt.alloc_buffers:
-                new_buf = _remap_buffer(buf, var_map)
+                new_buf = _remap_buffer(buf, var_map, num_warps)
                 new_alloc_bufs.append(new_buf)
                 if not new_buf.same_as(buf):
                     buf_map[buf] = new_buf
@@ -104,10 +108,34 @@ def _rewrite_scope(body, var_map):
             new_var = var_map.get(stmt.buffer_var, None)
             if new_var is not None:
                 new_body = tir.stmt_functor.substitute(stmt.body, var_map)
-                return tir.Allocate(new_var, stmt.dtype, stmt.extents, stmt.condition, new_body, stmt.annotations)
+                total = 1
+                for ext in stmt.extents:
+                    total *= ext.value if isinstance(ext, tir.IntImm) else ext
+                new_total = total // num_warps if num_warps > 1 else total
+                new_extents = [tir.IntImm("int32", new_total)]
+                return tir.Allocate(new_var, stmt.dtype, new_extents, stmt.condition, new_body, stmt.annotations)
         return None
 
     return tir.stmt_functor.ir_transform(body, _pre_order, None, ["tir.Block", "tir.Allocate"])
+
+
+def _get_num_warps(func):
+    warp_size = 32
+    num_threads = None
+
+    def _visitor(stmt):
+        nonlocal num_threads
+        if isinstance(stmt, tir.AttrStmt):
+            if stmt.attr_key == "thread_extent":
+                if hasattr(stmt.node, "thread_tag") and "threadIdx.x" in str(stmt.node.thread_tag):
+                    val = stmt.value
+                    if isinstance(val, tir.IntImm):
+                        num_threads = val.value
+
+    tir.stmt_functor.post_order_visit(func.body, _visitor)
+    if num_threads is not None:
+        return num_threads // warp_size
+    return 1
 
 
 @prim_func_pass(opt_level=0, name="tl.MetalFragmentToCooperativeTensor")
@@ -121,6 +149,8 @@ class MetalFragmentToCooperativeTensor:
         if not accum_vars:
             return func
 
+        num_warps = _get_num_warps(func)
+
         var_map: dict = {}
         for var in accum_vars:
             ptr_type = var.type_annotation
@@ -128,7 +158,7 @@ class MetalFragmentToCooperativeTensor:
             new_var = tir.Var(var.name, new_ptr)
             var_map[var] = new_var
 
-        new_body = _rewrite_scope(func.body, var_map)
+        new_body = _rewrite_scope(func.body, var_map, num_warps)
         return func.with_body(new_body)
 
 

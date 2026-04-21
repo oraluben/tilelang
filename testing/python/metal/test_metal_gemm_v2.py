@@ -68,8 +68,8 @@ def assert_gemm_v2(
 
 
 @tilelang.testing.requires_metal
-def test_gemm_v2_16x32x16():
-    assert_gemm_v2(128, 128, 128, 16, 32, 16)
+def test_gemm_v2_16x32x32():
+    assert_gemm_v2(128, 128, 128, 16, 32, 32)
 
 
 @tilelang.testing.requires_metal
