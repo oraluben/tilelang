@@ -47,6 +47,7 @@ class MPSIntrinEmitter:
         thread_var: tir.Var | None = None,
         a_stride_override: int | None = None,
         b_stride_override: int | None = None,
+        inner_k_steps: int = 1,
     ):
         self.a_dtype = a_dtype
         self.b_dtype = b_dtype
@@ -61,6 +62,7 @@ class MPSIntrinEmitter:
         self.thread_var = thread_var
         self.a_stride_override = a_stride_override
         self.b_stride_override = b_stride_override
+        self.inner_k_steps = inner_k_steps
 
         self.micro_size_x = 16
         self.micro_size_y = 32
@@ -109,13 +111,14 @@ class MPSIntrinEmitter:
     def _buf_idx(leading, row, col):
         return (*leading, row, col)
 
-    def ldmatrix_a(self, A_local_buf, A_shared_buf: Buffer | BufferRegion, ki):
+    def ldmatrix_a(self, A_local_buf, A_shared_buf: Buffer | BufferRegion, ki, k_inner: int = 0):
         warp_rows = self.warp_rows
         micro_size_x = self.micro_size_x
         micro_size_y = self.micro_size_y
         micro_size_k = self.micro_size_k
         a_transposed = self.a_transposed
         warp_row_tiles = self.warp_row_tiles
+        inner_k_steps = self.inner_k_steps
 
         warp_m, _ = self._get_warp_indices()
 
@@ -139,7 +142,7 @@ class MPSIntrinEmitter:
 
                 T.cooperative_tensor_load(
                     A_local_buf.data,
-                    i,
+                    k_inner * warp_rows + i,
                     ptr,
                     stride,
                     micro_size_x,
@@ -153,7 +156,7 @@ class MPSIntrinEmitter:
 
         return _warp_ldmatrix_a(A_local_buf, buffer, offset_m, offset_k, stride, warp_m, ki)
 
-    def ldmatrix_b(self, B_local_buf, B_shared_buf: Buffer | BufferRegion, ki):
+    def ldmatrix_b(self, B_local_buf, B_shared_buf: Buffer | BufferRegion, ki, k_inner: int = 0):
         warp_cols = self.warp_cols
         micro_size_x = self.micro_size_x
         micro_size_y = self.micro_size_y
@@ -183,7 +186,7 @@ class MPSIntrinEmitter:
 
                 T.cooperative_tensor_load(
                     B_local_buf.data,
-                    j,
+                    k_inner * warp_cols + j,
                     ptr,
                     stride,
                     micro_size_k,
@@ -197,9 +200,10 @@ class MPSIntrinEmitter:
 
         return _warp_ldmatrix_b(B_local_buf, buffer, offset_k, offset_n, stride, warp_n_offset, ki)
 
-    def mma(self, A_local_buf, B_local_buf, C_local_buf):
+    def mma(self, A_local_buf, B_local_buf, C_local_buf, k_inner: int = 0):
         warp_rows = self.warp_rows
         warp_cols = self.warp_cols
+        iks = self.inner_k_steps
 
         @T.macro
         def _warp_mma(A_local_buf, B_local_buf, C_local_buf):
@@ -208,9 +212,9 @@ class MPSIntrinEmitter:
                     C_local_buf.data,
                     i * warp_cols + j,
                     A_local_buf.data,
-                    i,
+                    k_inner * warp_rows + i,
                     B_local_buf.data,
-                    j,
+                    k_inner * warp_cols + j,
                     C_local_buf.data,
                     i * warp_cols + j,
                     self.micro_size_x,
