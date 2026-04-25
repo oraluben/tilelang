@@ -429,6 +429,18 @@ void CodeGenTileLangMetal::PrintStorageScope(const std::string &scope,
   }
 }
 
+void CodeGenTileLangMetal::VisitStmt_(const ForNode *op) {
+  if (op->kind == tir::ForKind::kUnrolled ||
+      op->kind == tir::ForKind::kSerial) {
+    auto *ext = op->extent.as<IntImmNode>();
+    if (ext && ext->value > 1 && ext->value <= 2) {
+      PrintIndent();
+      stream << "#pragma clang loop unroll(full)\n";
+    }
+  }
+  CodeGenC::VisitStmt_(op);
+}
+
 void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
   ICHECK(!is_zero(op->condition));
   std::string vid = AllocVarID(op->buffer_var.get());
