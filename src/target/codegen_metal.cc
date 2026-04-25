@@ -734,9 +734,16 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
     bool is_inlined = ct_c_inlined_.count(v.get()) > 0;
     auto *store_idx_imm = op->args[1].as<IntImmNode>();
     if (is_inlined && store_idx_imm) {
-      os << "for (ushort __i = 0; __i < 16; __i++) "
-         << var << "[" << idx << " * " << total_elems << " + __i] = "
-         << "__pct_c" << store_idx_imm->value << "[__i]; ";
+      // Each persistent CT holds 16 elements (one 16×32 MMA tile).
+      // A store tile may span multiple MMA tiles (e.g., 16×64 = 2 MMA tiles).
+      // Flush all persistent CTs that belong to this store tile.
+      int mma_tiles_per_store = total_elems / 16;
+      int base_pct = store_idx_imm->value * mma_tiles_per_store;
+      for (int t = 0; t < mma_tiles_per_store; t++) {
+        os << "for (ushort __i = 0; __i < 16; __i++) "
+           << var << "[" << idx << " * " << total_elems << " + " << (t * 16) << " + __i] = "
+           << "__pct_c" << (base_pct + t) << "[__i]; ";
+      }
     }
     os << "{ "
        << addr_space << " " << dtype << "* __dst = (" << addr_space << " " << dtype << "*)" << dst_ptr << "; ";

@@ -60,7 +60,12 @@ class GemmMetal(GemmBase):
         a_stride = None
         b_stride = None
 
-        inner_k_steps = 1
+        # inner_k_steps=2 batches two K-micro-steps per load cycle (MLX's TK=2).
+        # This halves K-loop iterations but doubles A/B register footprint.
+        # Only safe when C register pressure is low enough (c_per_thread ≤ 128B).
+        # MMA tile: 16×32 output, 32 threads/simdgroup → 16 floats = 64 bytes per tile per thread
+        c_bytes_per_thread = warp_row_tiles * warp_col_tiles * 64
+        inner_k_steps = 2 if c_bytes_per_thread <= 128 else 1
         mps_emitter = MPSIntrinEmitter(
             a_dtype=self.in_dtype,
             b_dtype=self.in_dtype,
