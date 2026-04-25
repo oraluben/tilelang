@@ -458,6 +458,19 @@ void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
     int elems_per_thread = constant_size / 32;
     stream << "thread " << dtype_str << " " << vid << '['
            << elems_per_thread << "];\n";
+    if (dtype_str == "float" && elems_per_thread == 16) {
+      ct_c_inlined_.insert(op->buffer_var.get());
+      this->PrintIndent();
+      stream << "constexpr auto __pct_desc = mpp::tensor_ops::matmul2d_descriptor("
+             << "16, 32, 16, false, false, true, "
+             << "mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);\n";
+      this->PrintIndent();
+      stream << "mpp::tensor_ops::matmul2d<__pct_desc, metal::execution_simdgroup> __pct_op;\n";
+      this->PrintIndent();
+      stream << "auto __pct_c = __pct_op.get_destination_cooperative_tensor<"
+             << "decltype(__pct_op.get_left_input_cooperative_tensor<half, half, float>()), "
+             << "decltype(__pct_op.get_right_input_cooperative_tensor<half, half, float>()), float>();\n";
+    }
   } else if (scope == "metal.simdgroup") {
     ICHECK(op->dtype == DataType::Float(16) ||
            op->dtype == DataType::Float(32) ||
@@ -599,8 +612,14 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
     int rows = op->args[3].as<IntImmNode>()->value;
     int cols = op->args[4].as<IntImmNode>()->value;
     int elems_per_tile = rows * cols / 32;
+    Var fill_v = Downcast<Var>(op->args[0]);
+    bool is_inlined = ct_c_inlined_.count(fill_v.get()) > 0;
     os << "for (ushort __i = 0; __i < " << elems_per_tile << "; __i++) "
        << var << "[" << idx << " * " << elems_per_tile << " + __i] = " << val;
+    if (is_inlined) {
+      os << "; for (ushort __i = 0; __i < " << elems_per_tile << "; __i++) "
+         << "__pct_c[__i] = " << val;
+    }
   } else if (op->op.same_as(builtin::cooperative_tensor_load())) {
     ICHECK_GE(op->args.size(), 11);
     std::string var = PrintExpr(op->args[0]);
@@ -651,6 +670,12 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
     int frag_rows = 16, frag_cols = 16;
     int nfrag_r = rows / frag_rows;
     int nfrag_c = cols / frag_cols;
+    int total_elems = nfrag_r * nfrag_c * 8;
+    bool is_inlined = ct_c_inlined_.count(v.get()) > 0;
+    if (is_inlined) {
+      os << "for (ushort __i = 0; __i < " << total_elems << "; __i++) "
+         << var << "[" << idx << " * " << total_elems << " + __i] = __pct_c[__i]; ";
+    }
     os << "{ "
        << addr_space << " " << dtype << "* __dst = (" << addr_space << " " << dtype << "*)" << dst_ptr << "; ";
     int elem_offset = 0;
@@ -662,7 +687,7 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
            << "ushort __r = __base_row + (__i >> 2) * 8 + " << row_off << "; "
            << "ushort __c = __base_col + (__i & 3) + " << col_off << "; "
            << "__dst[__r * " << stride << " + __c] = "
-           << var << "[" << idx << " * " << (nfrag_r * nfrag_c * 8) << " + "
+           << var << "[" << idx << " * " << total_elems << " + "
            << elem_offset << " + __i]; } ";
         elem_offset += 8;
       }
@@ -700,28 +725,50 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
         << "MPP matmul2d requires at least one of M, N, K to be 32, got "
         << M << "x" << N << "x" << K;
 
-    os << "{ "
-       << "constexpr auto __desc = mpp::tensor_ops::matmul2d_descriptor("
-       << M << ", " << N << ", " << K << ", "
-       << (trans_a ? "true" : "false") << ", "
-       << (trans_b ? "true" : "false") << ", true, "
-       << "mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate); "
-       << "mpp::tensor_ops::matmul2d<__desc, metal::execution_simdgroup> __op; "
-       << "auto __ct_a = __op.get_left_input_cooperative_tensor<"
-       << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
-       << "auto __ct_b = __op.get_right_input_cooperative_tensor<"
-       << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
-       << "auto __ct_c = __op.get_destination_cooperative_tensor<"
-       << "decltype(__ct_a), decltype(__ct_b), " << c_dtype << ">(); "
-       << "for (ushort __i = 0; __i < " << a_elems << "; __i++) "
-       << "__ct_a[__i] = " << a_var << "[" << a_idx << " * " << a_elems << " + __i]; "
-       << "for (ushort __i = 0; __i < " << b_elems << "; __i++) "
-       << "__ct_b[__i] = " << b_var << "[" << b_idx << " * " << b_elems << " + __i]; "
-       << "for (ushort __i = 0; __i < " << c_elems << "; __i++) "
-       << "__ct_c[__i] = " << c_var << "[" << c_idx << " * " << c_elems << " + __i]; "
-       << "__op.run(__ct_a, __ct_b, __ct_c); "
-       << "for (ushort __i = 0; __i < " << c_elems << "; __i++) "
-       << c_var << "[" << c_idx << " * " << c_elems << " + __i] = __ct_c[__i]; }";
+    {
+      bool c_inlined = ct_c_inlined_.count(c_v.get()) > 0;
+      if (c_inlined) {
+        os << "{ "
+           << "constexpr auto __desc = mpp::tensor_ops::matmul2d_descriptor("
+           << M << ", " << N << ", " << K << ", "
+           << (trans_a ? "true" : "false") << ", "
+           << (trans_b ? "true" : "false") << ", true, "
+           << "mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate); "
+           << "mpp::tensor_ops::matmul2d<__desc, metal::execution_simdgroup> __op; "
+           << "auto __ct_a = __op.get_left_input_cooperative_tensor<"
+           << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
+           << "auto __ct_b = __op.get_right_input_cooperative_tensor<"
+           << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
+           << "for (ushort __i = 0; __i < " << a_elems << "; __i++) "
+           << "__ct_a[__i] = " << a_var << "[" << a_idx << " * " << a_elems << " + __i]; "
+           << "for (ushort __i = 0; __i < " << b_elems << "; __i++) "
+           << "__ct_b[__i] = " << b_var << "[" << b_idx << " * " << b_elems << " + __i]; "
+           << "__op.run(__ct_a, __ct_b, __pct_c); }";
+      } else {
+        os << "{ "
+           << "constexpr auto __desc = mpp::tensor_ops::matmul2d_descriptor("
+           << M << ", " << N << ", " << K << ", "
+           << (trans_a ? "true" : "false") << ", "
+           << (trans_b ? "true" : "false") << ", true, "
+           << "mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate); "
+           << "mpp::tensor_ops::matmul2d<__desc, metal::execution_simdgroup> __op; "
+           << "auto __ct_a = __op.get_left_input_cooperative_tensor<"
+           << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
+           << "auto __ct_b = __op.get_right_input_cooperative_tensor<"
+           << a_dtype << ", " << a_dtype << ", " << c_dtype << ">(); "
+           << "auto __ct_c = __op.get_destination_cooperative_tensor<"
+           << "decltype(__ct_a), decltype(__ct_b), " << c_dtype << ">(); "
+           << "for (ushort __i = 0; __i < " << a_elems << "; __i++) "
+           << "__ct_a[__i] = " << a_var << "[" << a_idx << " * " << a_elems << " + __i]; "
+           << "for (ushort __i = 0; __i < " << b_elems << "; __i++) "
+           << "__ct_b[__i] = " << b_var << "[" << b_idx << " * " << b_elems << " + __i]; "
+           << "for (ushort __i = 0; __i < " << c_elems << "; __i++) "
+           << "__ct_c[__i] = " << c_var << "[" << c_idx << " * " << c_elems << " + __i]; "
+           << "__op.run(__ct_a, __ct_b, __ct_c); "
+           << "for (ushort __i = 0; __i < " << c_elems << "; __i++) "
+           << c_var << "[" << c_idx << " * " << c_elems << " + __i] = __ct_c[__i]; }";
+      }
+    }
   } else if (op->op.same_as(builtin::reinterpret())) {
     // generate as_type<TYPE>(ARG)
     os << "(as_type<";

@@ -109,7 +109,7 @@ class GemmMetal(GemmBase):
 
         num_k_iters = block_K // micro_size_k
         c_per_thread = num_simd_c * c_tile_elems * 4 // 32
-        use_double_buffer = num_k_iters > 1 and inner_k_steps == 1 and c_per_thread <= 64
+        use_double_buffer = num_k_iters >= 4 and inner_k_steps == 1 and c_per_thread <= 64
 
         if c_in_cooperative_tensor:
             if use_double_buffer:

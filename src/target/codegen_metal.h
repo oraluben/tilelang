@@ -28,6 +28,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "target/source/codegen_c.h"
 
@@ -69,6 +70,7 @@ private:
 
   std::unordered_map<const VarNode *, std::string> simdgroup_dtype_;
   std::unordered_map<const VarNode *, std::string> cooperative_tensor_dtype_;
+  std::unordered_set<const VarNode *> ct_c_inlined_;
   bool emitted_frag_lane_vars_{false};
   int thread_index_bits_{32};
   int thread_work_dim_{0};

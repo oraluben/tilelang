@@ -69,6 +69,56 @@ def _remap_buffer(buf, var_map, num_warps=1):
     )
 
 
+def _is_fill_on_accum_var(stmt, accum_vars):
+    """Check if stmt is a tl.fill call targeting one of the resized accum buffers."""
+    if not isinstance(stmt, tir.Evaluate):
+        return False
+    call = stmt.value
+    if not isinstance(call, tir.Call):
+        return False
+    op_name = str(call.op) if hasattr(call.op, "__str__") else ""
+    if "fill" not in op_name:
+        return False
+    if len(call.args) < 1:
+        return False
+    arg0 = call.args[0]
+    if isinstance(arg0, tir.BufferLoad):
+        return arg0.buffer.data in accum_vars
+    if isinstance(arg0, tir.Call):
+        if len(arg0.args) >= 1:
+            inner = arg0.args[0]
+            if isinstance(inner, tir.BufferLoad):
+                return inner.buffer.data in accum_vars
+            if isinstance(inner, tir.Var):
+                return inner in accum_vars
+    return False
+
+
+def _remove_fills_on_accum(body, accum_vars):
+    """Remove fill/clear ops on resized accum buffers (gemm handles its own clear)."""
+
+    def _pre_order(stmt):
+        if _is_fill_on_accum_var(stmt, accum_vars):
+            return tir.Evaluate(tir.const(0, "int32"))
+        if isinstance(stmt, tir.SeqStmt):
+            new_stmts = []
+            changed = False
+            for s in stmt.seq:
+                if _is_fill_on_accum_var(s, accum_vars):
+                    changed = True
+                else:
+                    new_stmts.append(s)
+            if changed:
+                if len(new_stmts) == 0:
+                    return tir.Evaluate(tir.const(0, "int32"))
+                if len(new_stmts) == 1:
+                    return new_stmts[0]
+                return tir.SeqStmt(new_stmts)
+        return None
+
+    return tir.stmt_functor.ir_transform(body, _pre_order, None, ["tir.Evaluate", "tir.SeqStmt"])
+
+
 def _rewrite_scope(body, var_map, num_warps=1):
     buf_map = {}
 
@@ -84,6 +134,7 @@ def _rewrite_scope(body, var_map, num_warps=1):
                     changed = True
             if changed:
                 new_body = tir.stmt_functor.substitute(stmt.body, var_map)
+                new_body = _remove_fills_on_accum(new_body, set(var_map.values()))
                 new_block = tir.Block(
                     stmt.iter_vars,
                     stmt.reads,
@@ -108,6 +159,7 @@ def _rewrite_scope(body, var_map, num_warps=1):
             new_var = var_map.get(stmt.buffer_var, None)
             if new_var is not None:
                 new_body = tir.stmt_functor.substitute(stmt.body, var_map)
+                new_body = _remove_fills_on_accum(new_body, set(var_map.values()))
                 total = 1
                 for ext in stmt.extents:
                     total *= ext.value if isinstance(ext, tir.IntImm) else ext
@@ -159,6 +211,8 @@ class MetalFragmentToCooperativeTensor:
             var_map[var] = new_var
 
         new_body = _rewrite_scope(func.body, var_map, num_warps)
+        all_accum_vars = set(var_map.keys()) | set(var_map.values())
+        new_body = _remove_fills_on_accum(new_body, all_accum_vars)
         return func.with_body(new_body)
 
 
