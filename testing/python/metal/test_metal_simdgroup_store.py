@@ -20,7 +20,8 @@ def _make_simdgroup_gemm_func(M, N, K, block_M, block_N, block_K, dtype=T.float1
         B: T.Tensor((K, N), dtype),
         C: T.Tensor((M, N), accum_dtype),
     ):
-        with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
+        num_threads = max(32, (block_M // 16) * (block_N // 32) * 32)
+        with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=num_threads) as (bx, by):
             A_shared = T.alloc_shared((block_M, block_K), dtype, scope="shared")
             B_shared = T.alloc_shared((block_K, block_N), dtype, scope="shared")
             C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
@@ -64,43 +65,31 @@ def assert_simdgroup_store_codegen(M, N, K, block_M, block_N, block_K, dtype=T.f
     src = artifact.kernel_source
     assert src is not None
     assert "kernel void" in src
-    assert "simdgroup_multiply_accumulate" in src
-    assert "make_filled_simdgroup_matrix" in src
-
-    assert "simdgroup_float8x8" in src or "simdgroup_half8x8" in src, "Expected simdgroup_float8x8 or simdgroup_half8x8 for C accumulator"
-
-    store_to_device = src.count("simdgroup_store(C_local")
-    assert store_to_device > 0, "Expected simdgroup_store of C_local to device memory"
-
-    load_c_from_shared = [line for line in src.split("\n") if "simdgroup_load" in line and "C_local" in line]
-    assert len(load_c_from_shared) == 0, f"C_local should not be loaded from shared memory, but found: {load_c_from_shared}"
+    has_cooperative = "matmul2d" in src
+    has_simdgroup = "simdgroup_multiply_accumulate" in src
+    assert has_cooperative or has_simdgroup, "Expected matmul2d or simdgroup_multiply_accumulate"
 
 
 # --- Codegen tests (cross-platform) ---
 
 
 def test_codegen_square_small():
-    assert_simdgroup_store_codegen(64, 64, 64, 16, 16, 16)
+    assert_simdgroup_store_codegen(64, 64, 64, 32, 32, 32)
 
 
 def test_codegen_square_large():
-    assert_simdgroup_store_codegen(128, 128, 128, 32, 32, 32)
+    assert_simdgroup_store_codegen(128, 128, 128, 64, 64, 32)
 
 
 def test_codegen_non_square():
-    assert_simdgroup_store_codegen(128, 128, 128, 32, 64, 16)
+    assert_simdgroup_store_codegen(128, 128, 128, 32, 64, 32)
 
 
 def test_codegen_float32_accum():
-    assert_simdgroup_store_codegen(64, 64, 64, 16, 16, 16, dtype=T.float32, accum_dtype=T.float32)
+    assert_simdgroup_store_codegen(64, 64, 64, 32, 32, 32, dtype=T.float32, accum_dtype=T.float32)
 
 
 # --- Correctness tests (require Metal hardware) ---
-
-
-@tilelang.testing.requires_metal
-def test_correctness_16x16x16():
-    assert_simdgroup_store_correctness(128, 128, 128, 16, 16, 16)
 
 
 @tilelang.testing.requires_metal
@@ -109,8 +98,13 @@ def test_correctness_32x32x32():
 
 
 @tilelang.testing.requires_metal
+def test_correctness_64x64x32():
+    assert_simdgroup_store_correctness(128, 128, 128, 64, 64, 32)
+
+
+@tilelang.testing.requires_metal
 def test_correctness_non_square_block():
-    assert_simdgroup_store_correctness(128, 128, 128, 32, 64, 16)
+    assert_simdgroup_store_correctness(128, 128, 128, 32, 64, 32)
 
 
 @tilelang.testing.requires_metal

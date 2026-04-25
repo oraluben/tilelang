@@ -189,6 +189,8 @@ GemmInst GemmNode::getGemmInst(int block_size, Target target) const {
     return GemmInst::kWMMA;
   } else if (TargetIsCuda(target)) {
     return GemmInst::kMMA;
+  } else if (TargetIsMetal(target)) {
+    return GemmInst::kMetalExp;
   } else if (TargetIsCPU(target)) {
     return GemmInst::kScalar;
   } else {
