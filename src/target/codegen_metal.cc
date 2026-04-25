@@ -433,9 +433,15 @@ void CodeGenTileLangMetal::VisitStmt_(const ForNode *op) {
   if (op->kind == tir::ForKind::kUnrolled ||
       op->kind == tir::ForKind::kSerial) {
     auto *ext = op->extent.as<IntImmNode>();
-    if (ext && ext->value > 1 && ext->value <= 2) {
-      PrintIndent();
-      stream << "#pragma clang loop unroll(full)\n";
+    if (ext) {
+      int64_t n = ext->value;
+      if (n > 1 && n <= 2) {
+        PrintIndent();
+        stream << "#pragma clang loop unroll(full)\n";
+      } else if (n > 4) {
+        PrintIndent();
+        stream << "#pragma clang loop unroll(disable)\n";
+      }
     }
   }
   CodeGenC::VisitStmt_(op);
