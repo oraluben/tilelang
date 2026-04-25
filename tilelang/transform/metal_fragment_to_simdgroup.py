@@ -211,8 +211,6 @@ class MetalFragmentToCooperativeTensor:
             var_map[var] = new_var
 
         new_body = _rewrite_scope(func.body, var_map, num_warps)
-        all_accum_vars = set(var_map.keys()) | set(var_map.values())
-        new_body = _remove_fills_on_accum(new_body, all_accum_vars)
         return func.with_body(new_body)
 
 

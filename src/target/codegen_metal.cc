@@ -430,19 +430,49 @@ void CodeGenTileLangMetal::PrintStorageScope(const std::string &scope,
 }
 
 void CodeGenTileLangMetal::VisitStmt_(const ForNode *op) {
-  if (op->kind == tir::ForKind::kUnrolled ||
-      op->kind == tir::ForKind::kSerial) {
-    auto *ext = op->extent.as<IntImmNode>();
-    if (ext) {
-      int64_t n = ext->value;
-      if (n > 1 && n <= 2) {
-        PrintIndent();
-        stream << "#pragma clang loop unroll(full)\n";
-      } else if (n > 4) {
-        PrintIndent();
-        stream << "#pragma clang loop unroll(disable)\n";
-      }
+  auto *min_imm = op->min.as<IntImmNode>();
+  auto *ext_imm = op->extent.as<IntImmNode>();
+  // Unroll small constant-bound loops at codegen level so that loop
+  // variables become IntImm constants. This is required for persistent
+  // cooperative_tensor C: Metal's cooperative_tensor type cannot form
+  // arrays, so each tile needs a named variable (__pct_c0, __pct_c1, ...).
+  // #pragma unroll would achieve the same in the Metal compiler, but by
+  // that point our codegen has already emitted runtime variable names
+  // that can't index into individual CT objects.
+  bool body_has_alloc = false;
+  tir::PostOrderVisit(op->body, [&](const ObjectRef &node) {
+    if (node->IsInstance<tir::AllocateNode>()) body_has_alloc = true;
+  });
+  if (ext_imm && min_imm && ext_imm->value >= 2 && ext_imm->value <= 4 && !body_has_alloc) {
+    int64_t start = min_imm->value;
+    int64_t extent = ext_imm->value;
+    for (int64_t i = 0; i < extent; i++) {
+      tvm::ffi::Map<tir::Var, PrimExpr> vmap;
+      vmap.Set(op->loop_var, IntImm(op->loop_var->dtype, start + i));
+      Stmt body = tir::Substitute(op->body, vmap);
+      // Substitute leaves unsimplified expressions like (0*2+0).
+      // Fold constant sub-expressions so c_idx becomes IntImm.
+      arith::Analyzer ana;
+      class ConstFolder : public tir::StmtExprMutator {
+        arith::Analyzer *ana_;
+      public:
+        explicit ConstFolder(arith::Analyzer *a) : ana_(a) {}
+        PrimExpr VisitExpr(const PrimExpr &e) final {
+          PrimExpr visited = tir::StmtExprMutator::VisitExpr(e);
+          if (!visited.as<IntImmNode>() && !visited.as<tir::VarNode>()) {
+            return ana_->Simplify(visited);
+          }
+          return visited;
+        }
+      };
+      body = ConstFolder(&ana)(std::move(body));
+      this->VisitStmt(body);
     }
+    return;
+  }
+  if (ext_imm && ext_imm->value > 4) {
+    PrintIndent();
+    stream << "#pragma clang loop unroll(disable)\n";
   }
   CodeGenC::VisitStmt_(op);
 }
@@ -476,7 +506,13 @@ void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
     int elems_per_thread = constant_size / 32;
     stream << "thread " << dtype_str << " " << vid << '['
            << elems_per_thread << "];\n";
+    // Declare persistent cooperative_tensor accumulators so MMA can
+    // accumulate in-place without per-call C round-trip copies.
+    // One CT object per 16-element tile (matmul2d 16×32 output).
+    // We use an array rather than individual variables because the tile
+    // index (c_idx) may be a runtime expression from unrolled loops.
     if (dtype_str == "float" && elems_per_thread == 16) {
+      int num_c_tiles = elems_per_thread / 16;
       ct_c_inlined_.insert(op->buffer_var.get());
       this->PrintIndent();
       stream << "constexpr auto __pct_desc = mpp::tensor_ops::matmul2d_descriptor("
@@ -484,10 +520,13 @@ void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
              << "mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);\n";
       this->PrintIndent();
       stream << "mpp::tensor_ops::matmul2d<__pct_desc, metal::execution_simdgroup> __pct_op;\n";
-      this->PrintIndent();
-      stream << "auto __pct_c = __pct_op.get_destination_cooperative_tensor<"
-             << "decltype(__pct_op.get_left_input_cooperative_tensor<half, half, float>()), "
-             << "decltype(__pct_op.get_right_input_cooperative_tensor<half, half, float>()), float>();\n";
+      for (int t = 0; t < num_c_tiles; t++) {
+        this->PrintIndent();
+        stream << "auto __pct_c" << t << " = __pct_op.get_destination_cooperative_tensor<"
+               << "decltype(__pct_op.get_left_input_cooperative_tensor<half, half, float>()), "
+               << "decltype(__pct_op.get_right_input_cooperative_tensor<half, half, float>()), float>(); "
+               << "for (ushort __i = 0; __i < 16; __i++) __pct_c" << t << "[__i] = 0.0f;\n";
+      }
     }
   } else if (scope == "metal.simdgroup") {
     ICHECK(op->dtype == DataType::Float(16) ||
@@ -632,11 +671,12 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
     int elems_per_tile = rows * cols / 32;
     Var fill_v = Downcast<Var>(op->args[0]);
     bool is_inlined = ct_c_inlined_.count(fill_v.get()) > 0;
+    auto *fill_idx_imm = op->args[1].as<IntImmNode>();
     os << "for (ushort __i = 0; __i < " << elems_per_tile << "; __i++) "
        << var << "[" << idx << " * " << elems_per_tile << " + __i] = " << val;
-    if (is_inlined) {
+    if (is_inlined && fill_idx_imm) {
       os << "; for (ushort __i = 0; __i < " << elems_per_tile << "; __i++) "
-         << "__pct_c[__i] = " << val;
+         << "__pct_c" << fill_idx_imm->value << "[__i] = " << val;
     }
   } else if (op->op.same_as(builtin::cooperative_tensor_load())) {
     ICHECK_GE(op->args.size(), 11);
@@ -692,9 +732,11 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
     int nfrag_c = cols / frag_cols;
     int total_elems = nfrag_r * nfrag_c * 8;
     bool is_inlined = ct_c_inlined_.count(v.get()) > 0;
-    if (is_inlined) {
-      os << "for (ushort __i = 0; __i < " << total_elems << "; __i++) "
-         << var << "[" << idx << " * " << total_elems << " + __i] = __pct_c[__i]; ";
+    auto *store_idx_imm = op->args[1].as<IntImmNode>();
+    if (is_inlined && store_idx_imm) {
+      os << "for (ushort __i = 0; __i < 16; __i++) "
+         << var << "[" << idx << " * " << total_elems << " + __i] = "
+         << "__pct_c" << store_idx_imm->value << "[__i]; ";
     }
     os << "{ "
        << addr_space << " " << dtype << "* __dst = (" << addr_space << " " << dtype << "*)" << dst_ptr << "; ";
@@ -749,7 +791,9 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
 
     {
       bool c_inlined = ct_c_inlined_.count(c_v.get()) > 0;
-      if (c_inlined) {
+      auto *c_idx_imm = op->args[1].as<IntImmNode>();
+      bool c_idx_const = c_inlined && c_idx_imm != nullptr;
+      if (c_idx_const) {
         os << "{ "
            << "constexpr auto __desc = mpp::tensor_ops::matmul2d_descriptor("
            << M << ", " << N << ", " << K << ", "
@@ -765,7 +809,7 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
            << "__ct_a[__i] = " << a_var << "[" << a_idx << " * " << a_elems << " + __i]; "
            << "for (ushort __i = 0; __i < " << b_elems << "; __i++) "
            << "__ct_b[__i] = " << b_var << "[" << b_idx << " * " << b_elems << " + __i]; "
-           << "__op.run(__ct_a, __ct_b, __pct_c); }";
+           << "__op.run(__ct_a, __ct_b, __pct_c" << c_idx_imm->value << "); }";
       } else {
         os << "{ "
            << "constexpr auto __desc = mpp::tensor_ops::matmul2d_descriptor("

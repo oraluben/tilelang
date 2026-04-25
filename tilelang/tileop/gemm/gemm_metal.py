@@ -108,7 +108,21 @@ class GemmMetal(GemmBase):
             raise ValueError(f"Unsupported gemm combination, A: {self.A.scope()}, B: {self.B.scope()}")
 
         num_k_iters = block_K // micro_size_k
+        # c_per_thread: bytes of C accumulator each thread must hold in registers.
+        #   num_simd_c = warp_rows * warp_cols  (MMA output tiles per simdgroup)
+        #   c_tile_elems = micro_size_x * micro_size_y = 16 * 32 = 512  (elements per tile)
+        #   * 4 / 32: 4 bytes per float32 element, 32 threads per simdgroup
+        # Examples (128×128 block):
+        #   1024 threads (32 sg): 1 tile  →  64 B/thread
+        #    512 threads (16 sg): 2 tiles → 128 B/thread
+        #    256 threads  (8 sg): 4 tiles → 256 B/thread
         c_per_thread = num_simd_c * c_tile_elems * 4 // 32
+        # Double-buffer requires:
+        #   - ≥4 K iterations (otherwise prologue/epilogue overhead dominates)
+        #   - inner_k_steps == 1 (batched K not yet compatible with DB)
+        #   - C fits in registers alongside A0/A1/B0/B1 double-buffer pairs
+        #     (DB adds ~192 B/thread for A/B copies; 128 B/thread C is the
+        #      empirical limit before register spilling hurts more than DB helps)
         use_double_buffer = num_k_iters >= 4 and inner_k_steps == 1 and c_per_thread <= 128
 
         if c_in_cooperative_tensor:
