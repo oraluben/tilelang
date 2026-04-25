@@ -662,12 +662,14 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
       for (int fc = 0; fc < nfrag_c; fc++) {
         int row_off = fr * frag_rows;
         int col_off = fc * frag_cols;
-        os << "for (ushort __i = 0; __i < 8; __i++) { "
-           << "ushort __r = __base_row + (__i >> 2) * 8 + " << row_off << "; "
-           << "ushort __c = __base_col + (__i & 3) + " << col_off << "; ";
-        os << var << "[" << idx << " * " << (nfrag_r * nfrag_c * 8) << " + "
-           << elem_offset << " + __i] = "
-           << "__src[__r * " << stride << " + __c]; } ";
+        os << "{ "
+           << "ushort __r0 = __base_row + " << row_off << "; "
+           << "ushort __r1 = __r0 + 8; "
+           << "ushort __c0 = __base_col + " << col_off << "; "
+           << "*(thread " << dtype << "4*)(&" << var << "[" << idx << " * " << (nfrag_r * nfrag_c * 8) << " + " << elem_offset << "]) = "
+           << "*(" << addr_space << " " << dtype << "4*)(&__src[__r0 * " << stride << " + __c0]); "
+           << "*(thread " << dtype << "4*)(&" << var << "[" << idx << " * " << (nfrag_r * nfrag_c * 8) << " + " << (elem_offset + 4) << "]) = "
+           << "*(" << addr_space << " " << dtype << "4*)(&__src[__r1 * " << stride << " + __c0]); } ";
         elem_offset += 8;
       }
     }
@@ -701,12 +703,14 @@ void CodeGenTileLangMetal::VisitExpr_(const CallNode *op,
       for (int fc = 0; fc < nfrag_c; fc++) {
         int row_off = fr * frag_rows;
         int col_off = fc * frag_cols;
-        os << "for (ushort __i = 0; __i < 8; __i++) { "
-           << "ushort __r = __base_row + (__i >> 2) * 8 + " << row_off << "; "
-           << "ushort __c = __base_col + (__i & 3) + " << col_off << "; "
-           << "__dst[__r * " << stride << " + __c] = "
-           << var << "[" << idx << " * " << total_elems << " + "
-           << elem_offset << " + __i]; } ";
+        os << "{ "
+           << "ushort __r0 = __base_row + " << row_off << "; "
+           << "ushort __r1 = __r0 + 8; "
+           << "ushort __c0 = __base_col + " << col_off << "; "
+           << "*(" << addr_space << " " << dtype << "4*)(&__dst[__r0 * " << stride << " + __c0]) = "
+           << "*(thread " << dtype << "4*)(&" << var << "[" << idx << " * " << total_elems << " + " << elem_offset << "]); "
+           << "*(" << addr_space << " " << dtype << "4*)(&__dst[__r1 * " << stride << " + __c0]) = "
+           << "*(thread " << dtype << "4*)(&" << var << "[" << idx << " * " << total_elems << " + " << (elem_offset + 4) << "]); } ";
         elem_offset += 8;
       }
     }
