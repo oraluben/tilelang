@@ -14,13 +14,11 @@ static inline uint3 rasterization2DRow(uint3 blockIdx, uint3 gridDim) {
   const uint panel_offset = block_idx % panel_size;
   const uint panel_idx = block_idx / panel_size;
   const uint total_panel = ceil_div(grid_size, panel_size);
-  const uint stride =
-      panel_idx + 1 < total_panel
-          ? panel_width
-          : (grid_size - panel_idx * panel_size) / gridDim.x;
-  const uint col_idx = (panel_idx & 1)
-                           ? gridDim.x - 1 - panel_offset / stride
-                           : panel_offset / stride;
+  const uint stride = panel_idx + 1 < total_panel
+                          ? panel_width
+                          : (grid_size - panel_idx * panel_size) / gridDim.x;
+  const uint col_idx = (panel_idx & 1) ? gridDim.x - 1 - panel_offset / stride
+                                       : panel_offset / stride;
   const uint row_idx = panel_offset % stride + panel_idx * panel_width;
   return uint3(col_idx, row_idx, blockIdx.z);
 }
@@ -34,13 +32,11 @@ static inline uint3 rasterization2DColumn(uint3 blockIdx, uint3 gridDim) {
   const uint panel_offset = block_idx % panel_size;
   const uint panel_idx = block_idx / panel_size;
   const uint total_panel = ceil_div(grid_size, panel_size);
-  const uint stride =
-      panel_idx + 1 < total_panel
-          ? panel_width
-          : (grid_size - panel_idx * panel_size) / gridDim.y;
-  const uint row_idx = (panel_idx & 1)
-                           ? gridDim.y - 1 - panel_offset / stride
-                           : panel_offset / stride;
+  const uint stride = panel_idx + 1 < total_panel
+                          ? panel_width
+                          : (grid_size - panel_idx * panel_size) / gridDim.y;
+  const uint row_idx = (panel_idx & 1) ? gridDim.y - 1 - panel_offset / stride
+                                       : panel_offset / stride;
   const uint col_idx = panel_offset % stride + panel_idx * panel_width;
   return uint3(col_idx, row_idx, blockIdx.z);
 }

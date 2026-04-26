@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .gemm_base import GemmBase
 from .inst import GemmInst
-from tilelang.layout import Layout, make_linear_layout
+from tilelang.layout import Layout
 from tilelang.utils.language import is_shared, is_global, is_full_region, is_metal_cooperative_tensor, is_fragment
 from tilelang import tvm as tvm
 from tvm.target import Target
@@ -112,7 +112,6 @@ class GemmMetal(GemmBase):
         if not (self.is_gemm_ss() or self.is_gemm_gg()):
             raise ValueError(f"Unsupported gemm combination, A: {self.A.scope()}, B: {self.B.scope()}")
 
-        num_k_iters = block_K // micro_size_k
         if c_in_cooperative_tensor:
 
             @T.prim_func
