@@ -264,6 +264,9 @@ void CodeGenTileLangMetal::AddFunction(const GlobalVar &gvar,
     stream << " blockIdx [[threadgroup_position_in_grid]],\n";
     stream << "  ";
     PrintType(DataType::UInt(thread_index_bits_, work_dim), stream);
+    stream << " __gridDim [[threadgroups_per_grid]],\n";
+    stream << "  ";
+    PrintType(DataType::UInt(thread_index_bits_, work_dim), stream);
     stream << " threadIdx [[thread_position_in_threadgroup]]\n";
   }
   thread_work_dim_ = work_dim;
@@ -429,6 +432,59 @@ void CodeGenTileLangMetal::PrintStorageScope(const std::string &scope,
   }
 }
 
+void CodeGenTileLangMetal::VisitStmt_(const AttrStmtNode *op) {
+  if (op->attr_key == "threadblock_swizzle_pattern") {
+    std::string func_name;
+    int panel_size = 0;
+    if (const auto *call = op->value.as<CallNode>()) {
+      if (call->op.same_as(tir::builtin::tvm_tuple()) && call->args.size() >= 2) {
+        const auto *name_node = call->args[0].as<StringImmNode>();
+        const auto *size_node = call->args[1].as<IntImmNode>();
+        ICHECK(name_node && size_node);
+        func_name = name_node->value;
+        panel_size = static_cast<int>(size_node->value);
+      }
+    }
+    ICHECK(!func_name.empty() && panel_size > 0);
+
+    // Inline block swizzle: shadow blockIdx with swizzled indices.
+    this->PrintIndent();
+    stream << "{ ";
+    if (func_name == "rasterization2DRow") {
+      stream << "const uint __bi = blockIdx.x + blockIdx.y * __gridDim.x; "
+                "const uint __gs = __gridDim.x * __gridDim.y; "
+                "const uint __ps = " << panel_size << "u * __gridDim.x; "
+                "const uint __po = __bi % __ps; "
+                "const uint __pi = __bi / __ps; "
+                "const uint __tp = (__gs + __ps - 1u) / __ps; "
+                "const uint __st = __pi + 1u < __tp ? "
+                  << panel_size << "u : (__gs - __pi * __ps) / __gridDim.x; "
+                "const uint3 blockIdx = uint3("
+                  "(__pi & 1u) ? __gridDim.x - 1u - __po / __st : __po / __st, "
+                  "__po % __st + __pi * " << panel_size << "u, "
+                  "blockIdx.z);\n";
+    } else {
+      stream << "const uint __bi = blockIdx.x + blockIdx.y * __gridDim.x; "
+                "const uint __gs = __gridDim.x * __gridDim.y; "
+                "const uint __ps = " << panel_size << "u * __gridDim.y; "
+                "const uint __po = __bi % __ps; "
+                "const uint __pi = __bi / __ps; "
+                "const uint __tp = (__gs + __ps - 1u) / __ps; "
+                "const uint __st = __pi + 1u < __tp ? "
+                  << panel_size << "u : (__gs - __pi * __ps) / __gridDim.y; "
+                "const uint3 blockIdx = uint3("
+                  "__po % __st + __pi * " << panel_size << "u, "
+                  "(__pi & 1u) ? __gridDim.y - 1u - __po / __st : __po / __st, "
+                  "blockIdx.z);\n";
+    }
+    this->VisitStmt(op->body);
+    this->PrintIndent();
+    stream << "}\n";
+    return;
+  }
+  CodeGenC::VisitStmt_(op);
+}
+
 void CodeGenTileLangMetal::VisitStmt_(const ForNode *op) {
   auto *min_imm = op->min.as<IntImmNode>();
   auto *ext_imm = op->extent.as<IntImmNode>();
@@ -511,7 +567,14 @@ void CodeGenTileLangMetal::VisitStmt_(const AllocateNode *op) {
     // One CT object per 16-element tile (matmul2d 16×32 output).
     // We use an array rather than individual variables because the tile
     // index (c_idx) may be a runtime expression from unrolled loops.
-    if (dtype_str == "float" && elems_per_thread == 16) {
+    // Persistent cooperative_tensor accumulators: keep C in CT objects
+    // across all MMA calls so the Metal compiler can keep them in
+    // simdgroup registers, eliminating per-MMA C round-trip copies.
+    // Requires elems_per_thread to be a multiple of 16 (one CT per
+    // 16×32 output tile).  The tile index c_idx must resolve to a
+    // compile-time constant; our codegen-level loop unroll (extent ≤ 4)
+    // guarantees this for up to 4 tiles (256-thread config).
+    if (dtype_str == "float" && elems_per_thread >= 16 && elems_per_thread % 16 == 0) {
       int num_c_tiles = elems_per_thread / 16;
       ct_c_inlined_.insert(op->buffer_var.get());
       this->PrintIndent();

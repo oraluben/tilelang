@@ -33,8 +33,8 @@ class GemmMetal(GemmBase):
     def infer_layout(self, target: Target, thread_nums: int):
         if self.is_gemm_ss():
             return {
-                self.A: make_linear_layout(self.A),
-                self.B: make_linear_layout(self.B),
+                self.A: _make_padded_layout(self.A),
+                self.B: _make_padded_layout(self.B),
             }
         return {}
 
@@ -57,8 +57,8 @@ class GemmMetal(GemmBase):
 
         from tilelang.intrinsics.metal_macro_generator import MPSIntrinEmitter
 
-        a_stride = None
-        b_stride = None
+        a_stride = self._get_padded_stride(self.A) if self.is_gemm_ss() else None
+        b_stride = self._get_padded_stride(self.B) if self.is_gemm_ss() else None
 
         # inner_k_steps=2 batches two K-micro-steps per load cycle (MLX's TK=2).
         # This halves K-loop iterations but doubles A/B register footprint.
