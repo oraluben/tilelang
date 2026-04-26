@@ -201,7 +201,7 @@ def LowerAndLegalize(mod: IRModule, target: Target) -> IRModule:
     # before layout inference (which would otherwise require a layout for them)
     from tilelang.transform.metal_fragment_to_simdgroup import MetalFragmentToCooperativeTensor
 
-    mod = MetalFragmentToCooperativeTensor()(mod)
+    mod = MetalFragmentToCooperativeTensor(mod)
     # Infer memory layouts for fragments and shared memory
     mod = tilelang.transform.LayoutInference()(mod)
     # Visualize the layout

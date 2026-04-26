@@ -192,29 +192,33 @@ def _get_num_warps(func):
     return 1
 
 
-@prim_func_pass(opt_level=0, name="tl.MetalFragmentToCooperativeTensor")
-class MetalFragmentToCooperativeTensor:
-    def transform_function(self, func: tir.PrimFunc, mod: IRModule, ctx) -> tir.PrimFunc:
-        target = func.attrs.get("target", None)
-        if target is None or target.kind.name != "metal":
-            return func
+def _metal_fragment_to_cooperative_tensor(func: tir.PrimFunc, mod: IRModule, ctx) -> tir.PrimFunc:
+    target = func.attrs.get("target", None)
+    if target is None or target.kind.name != "metal":
+        return func
 
-        accum_vars = _collect_fragment_gemm_accum_vars(func.body)
-        if not accum_vars:
-            return func
+    accum_vars = _collect_fragment_gemm_accum_vars(func.body)
+    if not accum_vars:
+        return func
 
-        num_warps = _get_num_warps(func)
+    num_warps = _get_num_warps(func)
 
-        var_map: dict = {}
-        for var in accum_vars:
-            ptr_type = var.type_annotation
-            new_ptr = PointerType(ptr_type.element_type, "metal.cooperative_tensor")
-            new_var = tir.Var(var.name, new_ptr)
-            var_map[var] = new_var
+    var_map: dict = {}
+    for var in accum_vars:
+        ptr_type = var.type_annotation
+        new_ptr = PointerType(ptr_type.element_type, "metal.cooperative_tensor")
+        new_var = tir.Var(var.name, new_ptr)
+        var_map[var] = new_var
 
-        new_body = _rewrite_scope(func.body, var_map, num_warps)
-        return func.with_body(new_body)
+    new_body = _rewrite_scope(func.body, var_map, num_warps)
+    return func.with_body(new_body)
 
+
+MetalFragmentToCooperativeTensor = prim_func_pass(
+    _metal_fragment_to_cooperative_tensor,
+    opt_level=0,
+    name="tl.MetalFragmentToCooperativeTensor",
+)
 
 # Keep backward-compatible alias
 MetalFragmentToSimdgroup = MetalFragmentToCooperativeTensor
