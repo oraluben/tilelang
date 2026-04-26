@@ -57,7 +57,7 @@ def assert_metal_gemm_v2_codegen(
     # Verify matrix operations are present (cooperative_tensor/matmul2d or simdgroup)
     has_cooperative = "matmul2d" in src_code or "cooperative_tensor" in src_code
     has_simdgroup = "simdgroup_multiply_accumulate" in src_code
-    assert has_cooperative or has_simdgroup, f"Expected matmul2d or simdgroup_multiply_accumulate in Metal source"
+    assert has_cooperative or has_simdgroup, "Expected matmul2d or simdgroup_multiply_accumulate in Metal source"
 
 
 def test_metal_gemm_v2_float16():

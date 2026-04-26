@@ -84,13 +84,12 @@ def _is_fill_on_accum_var(stmt, accum_vars):
     arg0 = call.args[0]
     if isinstance(arg0, tir.BufferLoad):
         return arg0.buffer.data in accum_vars
-    if isinstance(arg0, tir.Call):
-        if len(arg0.args) >= 1:
-            inner = arg0.args[0]
-            if isinstance(inner, tir.BufferLoad):
-                return inner.buffer.data in accum_vars
-            if isinstance(inner, tir.Var):
-                return inner in accum_vars
+    if isinstance(arg0, tir.Call) and len(arg0.args) >= 1:
+        inner = arg0.args[0]
+        if isinstance(inner, tir.BufferLoad):
+            return inner.buffer.data in accum_vars
+        if isinstance(inner, tir.Var):
+            return inner in accum_vars
     return False
 
 
@@ -177,12 +176,15 @@ def _get_num_warps(func):
 
     def _visitor(stmt):
         nonlocal num_threads
-        if isinstance(stmt, tir.AttrStmt):
-            if stmt.attr_key == "thread_extent":
-                if hasattr(stmt.node, "thread_tag") and "threadIdx.x" in str(stmt.node.thread_tag):
-                    val = stmt.value
-                    if isinstance(val, tir.IntImm):
-                        num_threads = val.value
+        if (
+            isinstance(stmt, tir.AttrStmt)
+            and stmt.attr_key == "thread_extent"
+            and hasattr(stmt.node, "thread_tag")
+            and "threadIdx.x" in str(stmt.node.thread_tag)
+        ):
+            val = stmt.value
+            if isinstance(val, tir.IntImm):
+                num_threads = val.value
 
     tir.stmt_functor.post_order_visit(func.body, _visitor)
     if num_threads is not None:

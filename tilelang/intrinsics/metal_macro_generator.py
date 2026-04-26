@@ -118,7 +118,6 @@ class MPSIntrinEmitter:
         micro_size_k = self.micro_size_k
         a_transposed = self.a_transposed
         warp_row_tiles = self.warp_row_tiles
-        inner_k_steps = self.inner_k_steps
 
         warp_m, _ = self._get_warp_indices()
 
@@ -203,7 +202,6 @@ class MPSIntrinEmitter:
     def mma(self, A_local_buf, B_local_buf, C_local_buf, k_inner: int = 0):
         warp_rows = self.warp_rows
         warp_cols = self.warp_cols
-        iks = self.inner_k_steps
 
         @T.macro
         def _warp_mma(A_local_buf, B_local_buf, C_local_buf):

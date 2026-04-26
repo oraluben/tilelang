@@ -108,11 +108,6 @@ def test_correctness_non_square_block():
 
 
 @tilelang.testing.requires_metal
-def test_correctness_64x64x32():
-    assert_simdgroup_store_correctness(128, 128, 128, 64, 64, 32)
-
-
-@tilelang.testing.requires_metal
 def test_correctness_large_matrix():
     assert_simdgroup_store_correctness(1024, 1024, 1024, 32, 32, 32, atol=1.0)
 

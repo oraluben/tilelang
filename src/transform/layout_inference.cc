@@ -440,9 +440,8 @@ public:
     for (const auto &[buffer, _] : use_list_) {
       if (IsFragmentBuffer(buffer)) {
         if (!TargetIsMetal(target_) && layout_map.count(buffer) == 0) {
-          ICHECK(false)
-              << "The layout for fragment " << buffer
-              << " can not be inferred correctly.";
+          ICHECK(false) << "The layout for fragment " << buffer
+                        << " can not be inferred correctly.";
         }
       }
       if (IsCooperativeTensorBuffer(buffer)) {
