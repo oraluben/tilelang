@@ -696,12 +696,16 @@ private:
       ICHECK(IsBufferContiguous(buffer, analyzer_))
           << buffer
           << " has non-contiguous strides, but layout map is provided.";
-      // forward indices
       auto layout = layout_map_[buffer];
+      // Expand layout if buffer has leading dims (e.g. from pipeline versioning)
+      if (indices.size() > layout->InputShape().size()) {
+        size_t leading = indices.size() - layout->InputShape().size();
+        Array<PrimExpr> leading_shape(buffer->shape.begin(),
+                                      buffer->shape.begin() + leading);
+        layout = layout->Expand(leading_shape);
+      }
       transformed_indices = layout->Forward(indices);
-      // Reshape transformed_indices to match buffer->shape dimensions if needed
       if (transformed_indices.size() != buffer->shape.size()) {
-        // Step 1: Compute linear offset using layout->OutputShape()
         auto output_shape = layout->OutputShape();
         ICHECK_EQ(transformed_indices.size(), output_shape.size())
             << "Forward indices size " << transformed_indices.size()

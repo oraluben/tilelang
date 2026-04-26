@@ -313,6 +313,14 @@ private:
                             .as<Map<Buffer, Layout>>()
                             .value();
       for (auto [buffer, layout] : layout_map) {
+        // Expand layout if buffer has more dims than layout expects
+        // (e.g. pipeline versioning added a leading dim)
+        if (buffer->shape.size() > layout->InputShape().size()) {
+          size_t leading = buffer->shape.size() - layout->InputShape().size();
+          Array<PrimExpr> leading_shape(buffer->shape.begin(),
+                                        buffer->shape.begin() + leading);
+          layout = layout->Expand(leading_shape);
+        }
         buffer_remap_.Set(buffer,
                           makeBufferWithLayout(buffer, layout, var_remap_));
         layout_map_.Set(buffer, layout);

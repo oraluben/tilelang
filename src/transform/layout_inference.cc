@@ -156,7 +156,6 @@ public:
                                                      false},
                                      level);
 
-    // Process the returned updates
     for (const auto &[buffer, layout] : updates) {
       // Basic validity checks
       ICHECK(buffer.defined()) << "InferLayout returned an undefined buffer.";
@@ -182,14 +181,13 @@ public:
               }
             }
           }
+          LOG(WARNING) << "propagate_alias: src=" << src_buffer->name
+                    << " sib=" << sib->name << " sib_shape=" << sib->shape
+                    << " layout_input=" << src_layout->InputShape()
+                    << " shapes_equal=" << shapes_equal;
           Layout target_layout =
               shapes_equal
                   ? src_layout
-                  // Alias buffers may reinterpret the same storage with a
-                  // different element width.  Reshape the inferred layout using
-                  // the old/new storage bit ratio so that layout inference
-                  // keeps the physical storage footprint unchanged while
-                  // allowing the logical element count to change.
                   : src_layout->Reshape(
                         sib->shape, &analyzer_,
                         Integer(GetElementStorageBits(src_buffer->dtype)),
@@ -761,7 +759,6 @@ private:
 
     // After visiting, apply layouts to all collected buffers
     if (op->annotations.count(attr::kLayoutMap)) {
-      // Check if the layout map is Map<Var, Layout>
       auto map =
           op->annotations.Get(attr::kLayoutMap)->as<Map<Var, Layout>>().value();
       for (const auto &[var, layout] : map) {
@@ -778,8 +775,6 @@ private:
         // Apply layout to all buffers associated with this var
         for (const auto &buffer : buffers) {
 
-          // Reshape the layout to match the buffer's shape
-          // Check if shapes are structurally equal
           bool shapes_equal =
               ShapesEqual(layout->InputShape(), buffer->shape, &analyzer_);
 
