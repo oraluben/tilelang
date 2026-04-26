@@ -1126,7 +1126,8 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
     kTileN = warp_N;
     kTileM = kTileSize;
   }
-  if (kTileN > warp_N) kTileN = warp_N;
+  if (kTileN > warp_N)
+    kTileN = warp_N;
 
   int warp_row_tiles = warp_M / kTileM;
   int warp_col_tiles = warp_N / kTileN;
@@ -1136,11 +1137,11 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
       << "x" << n_warp << " warps";
 
   int tile_elems_per_thread = kTileM * kTileN / warp_size;
-  ICHECK(warp_row_tiles * warp_col_tiles * tile_elems_per_thread == elems_per_thread)
-      << "Tile partition inconsistent with buffer size: "
-      << warp_row_tiles << "x" << warp_col_tiles << " tiles of "
-      << kTileM << "x" << kTileN << " = "
-      << warp_row_tiles * warp_col_tiles * tile_elems_per_thread
+  ICHECK(warp_row_tiles * warp_col_tiles * tile_elems_per_thread ==
+         elems_per_thread)
+      << "Tile partition inconsistent with buffer size: " << warp_row_tiles
+      << "x" << warp_col_tiles << " tiles of " << kTileM << "x" << kTileN
+      << " = " << warp_row_tiles * warp_col_tiles * tile_elems_per_thread
       << " elems/thread, expected " << elems_per_thread;
 
   PrimExpr warp_m = FloorMod(warp_id, m_warp);
@@ -1150,21 +1151,17 @@ Stmt CopyNode::LowerCooperativeTensorCopy(const LowerArgs &T,
   for (int i = 0; i < warp_row_tiles; i++) {
     for (int j = 0; j < warp_col_tiles; j++) {
       int tile_idx = i * warp_col_tiles + j;
-      PrimExpr row =
-          dst_row_base + warp_m * warp_M + i * kTileM;
-      PrimExpr col =
-          dst_col_base + warp_n * warp_N + j * kTileN;
+      PrimExpr row = dst_row_base + warp_m * warp_M + i * kTileM;
+      PrimExpr col = dst_col_base + warp_n * warp_N + j * kTileN;
       PrimExpr ptr = Call(DataType::Handle(), builtin::address_of(),
                           {BufferLoad(dst, {row, col})});
       int kMMAK = kTileSize;
       stmts.push_back(Evaluate(Call(
           DataType::Handle(), builtin::cooperative_tensor_store(),
           {src->data, IntImm(DataType::Int(32), tile_idx), ptr, dst_stride,
-           IntImm(DataType::Int(32), kTileM),
-           IntImm(DataType::Int(32), kTileN),
+           IntImm(DataType::Int(32), kTileM), IntImm(DataType::Int(32), kTileN),
            Cast(DataType::Bool(), IntImm(DataType::Int(32), 0)),
-           IntImm(DataType::Int(32), kTileM),
-           IntImm(DataType::Int(32), kTileN),
+           IntImm(DataType::Int(32), kTileM), IntImm(DataType::Int(32), kTileN),
            IntImm(DataType::Int(32), kMMAK), IntImm(DataType::Int(32), 2)})));
     }
   }

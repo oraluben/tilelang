@@ -175,11 +175,11 @@ Stmt FillNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
     PrimExpr fill_value = Cast(dst->dtype, value);
     Array<Stmt> stmts;
     for (int i = 0; i < num_tiles; i++) {
-      stmts.push_back(Evaluate(Call(
-          DataType::Handle(), builtin::cooperative_tensor_fill(),
-          {dst->data, IntImm(DataType::Int(32), i), fill_value,
-           IntImm(DataType::Int(32), kTileM),
-           IntImm(DataType::Int(32), kTileN)})));
+      stmts.push_back(
+          Evaluate(Call(DataType::Handle(), builtin::cooperative_tensor_fill(),
+                        {dst->data, IntImm(DataType::Int(32), i), fill_value,
+                         IntImm(DataType::Int(32), kTileM),
+                         IntImm(DataType::Int(32), kTileN)})));
     }
     if (stmts.size() == 1)
       return stmts[0];

@@ -24,12 +24,12 @@ enum class CopyInst : uint8_t {
   kCPAsync = 5,   // cp.async global->shared copy
   // we should separate the bulk load and store for 1d and multi-dim
   // as they have different memory access patterns
-  kBulkLoad1D = 6,      // utilize tma load 1d
-  kBulkStore1D = 7,     // utilize tma store 1d
-  kTMemLoad = 8,        // tcgen05.ld (tensor memory -> register)
-  kTMemStore = 9,       // tcgen05.st (register -> tensor memory)
-  kMetalSIMDGroup = 10,          // Metal simdgroup load/store
-  kMetalCooperativeTensor = 11,  // Metal cooperative_tensor store
+  kBulkLoad1D = 6,              // utilize tma load 1d
+  kBulkStore1D = 7,             // utilize tma store 1d
+  kTMemLoad = 8,                // tcgen05.ld (tensor memory -> register)
+  kTMemStore = 9,               // tcgen05.st (register -> tensor memory)
+  kMetalSIMDGroup = 10,         // Metal simdgroup load/store
+  kMetalCooperativeTensor = 11, // Metal cooperative_tensor store
 };
 
 /// Convert CopyInst enum to string for debugging
@@ -347,7 +347,8 @@ protected:
    * \brief Generate lowering for simdgroup store.
    */
   Stmt LowerSIMDGroupCopy(const LowerArgs &T, arith::Analyzer *analyzer) const;
-  Stmt LowerCooperativeTensorCopy(const LowerArgs &T, arith::Analyzer *analyzer) const;
+  Stmt LowerCooperativeTensorCopy(const LowerArgs &T,
+                                  arith::Analyzer *analyzer) const;
 
   /*!
    * \brief Generate SIMT (thread-level) loop for copying.
