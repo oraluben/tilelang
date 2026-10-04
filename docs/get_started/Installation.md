@@ -103,7 +103,24 @@ apt-get update
 apt-get install -y python3 python3-dev python3-setuptools gcc zlib1g-dev build-essential cmake libedit-dev
 ```
 
-On Windows, install Python 3, CMake, and Visual Studio Build Tools with the MSVC C++ toolchain. Run the `pip install` commands below from a Visual Studio Developer Command Prompt (or `call VsDevCmd.bat` first) so that `cl.exe` is on `PATH` and CMake can detect the compiler.
+On Windows, install Python 3 and Visual Studio Build Tools with the MSVC C++
+toolchain, a Windows SDK, and **C++ Clang compiler for Windows**. Native sources
+require clang-cl; host JIT also supports cl.exe. Ninja builds discover the
+toolchain from ordinary PowerShell; `VSDEVCMD_BAT` selects a custom installation.
+Python build dependencies supply CMake and Ninja. See [Windows build details](../developer_guide/windows_build.md)
+for compiler overrides and environment handling.
+
+GPU SDKs are optional: select CUDA with the `nvcc` extra or AMD HIP with the
+`rocm` extra. CPU builds need neither SDK. To force a CPU build on a machine
+with GPU SDKs installed:
+
+```powershell
+$env:USE_CUDA = "OFF"
+$env:USE_ROCM = "OFF"
+$env:USE_ASCEND = "OFF"
+$env:USE_LLVM = "OFF"
+pip install . -v
+```
 
 Then, clone the tilelang repository and install it using pip. The `-v` flag enables verbose output during the build process.
 
@@ -135,8 +152,9 @@ your device extra. For example, Radeon 780M (`gfx1103`) was validated with:
 pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "torch[device-gfx1103]==2.13.0+rocm10.0.0"
 ```
 
-Build without isolation to use the selected SDK and avoid the current
-Windows build-isolation requirements which provision CUDA unconditionally.
+Build without isolation to use the SDK packages installed in the active Python
+environment. Isolated builds require an externally discoverable SDK path;
+TileLang's build requirements install no GPU SDK automatically.
 Windows HIP stubs are not implemented; leave `TILELANG_USE_HIP_STUBS=OFF`
 (the Windows default). The resulting native libraries require the HIP runtime
 DLLs, whose directories TileLang discovers from the SDK.
@@ -169,6 +187,18 @@ pip install -r requirements-dev.txt
 pip install "nvidia-cuda-nvcc>=13" "nvidia-cuda-cccl>=13" "nvidia-cuda-nvrtc>=13"
 pip install . -v --no-build-isolation
 ```
+
+For an isolated CUDA build, add the SDK to the build requirements:
+
+```bash
+pip install . -v -Ccmake.define.USE_CUDA=ON \
+  '-Cbuild.requires=nvidia-cuda-nvcc>=13' \
+  '-Cbuild.requires=nvidia-cuda-cccl>=13' \
+  '-Cbuild.requires=nvidia-cuda-nvrtc>=13'
+```
+
+The `tilelang[nvcc]` extra installs JIT dependencies, which do not enter an
+isolated build environment.
 
 **Option B** — pip toolchain in another virtualenv or path:
 
