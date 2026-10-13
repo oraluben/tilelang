@@ -45,19 +45,21 @@ def test_fragment_operand_codegen(a_fragment, b_fragment):
 
 @tilelang.testing.requires_metal
 @pytest.mark.parametrize(
-    "a_fragment,b_fragment,policy",
+    "m,n,k,a_fragment,b_fragment,policy",
     [
-        (True, False, T.GemmWarpPolicy.Square),
-        (False, True, T.GemmWarpPolicy.Square),
-        (True, True, T.GemmWarpPolicy.Square),
-        (True, True, T.GemmWarpPolicy.FullRow),
-        (True, True, T.GemmWarpPolicy.FullCol),
+        (32, 64, 32, True, False, T.GemmWarpPolicy.Square),
+        (32, 64, 32, False, True, T.GemmWarpPolicy.Square),
+        (32, 64, 32, True, True, T.GemmWarpPolicy.Square),
+        (32, 64, 32, True, True, T.GemmWarpPolicy.FullRow),
+        (32, 64, 32, True, True, T.GemmWarpPolicy.FullCol),
+        # Non-square fragment inputs replicated across all four warps.
+        pytest.param(64, 32, 16, True, False, T.GemmWarpPolicy.FullCol, id="replicate-a"),
+        pytest.param(32, 64, 16, False, True, T.GemmWarpPolicy.FullRow, id="replicate-b"),
     ],
 )
 @pytest.mark.parametrize("trans_a,trans_b", [(False, False), (True, False), (False, True), (True, True)])
 @pytest.mark.parametrize("shared_c", [False, True])
-def test_fragment_operands_execution(a_fragment, b_fragment, trans_a, trans_b, shared_c, policy):
-    m, n, k = 32, 64, 32
+def test_fragment_operands_execution(m, n, k, a_fragment, b_fragment, trans_a, trans_b, shared_c, policy):
     a = torch.randn((k, m) if trans_a else (m, k), dtype=torch.float16)
     b = torch.randn((n, k) if trans_b else (k, n), dtype=torch.float16)
     c = torch.empty(m, n, device="mps")
