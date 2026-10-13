@@ -21,7 +21,9 @@ WIDTH = 4
 ROLLED = {"tl.UnrollLoop": {"auto_max_step": 0, "auto_max_extent": 0, "explicit_unroll": False}}
 
 
-def row_sums():
+def row_sums(unroll=False):
+    loop = T.unroll if unroll else T.serial
+
     @T.prim_func
     def main(A: T.Tensor((ROWS, WIDTH), "float32"), B: T.Tensor((ROWS,), "float32")):
         with T.Kernel(T.ceildiv(ROWS, 32), threads=32) as block:
@@ -29,16 +31,15 @@ def row_sums():
             if i < ROWS:
                 B[i] = 0.0
                 # A carried dependence keeps the loop out of the vectorizer.
-                for j in T.serial(WIDTH):
+                for j in loop(WIDTH):
                     B[i] = B[i] + A[i, j] * (j + 1)
 
     return main
 
 
-def kernel_body(pass_configs=None) -> str:
+def kernel_source(unroll=False, pass_configs=None) -> str:
     with tvm.target.Target("metal"), tvm.transform.PassContext(opt_level=3, config=pass_configs):
-        source = tilelang.lower(row_sums(), target="metal").kernel_source
-    return source[source.index("main_kernel(") :]
+        return tilelang.lower(row_sums(unroll=unroll), target="metal").kernel_source
 
 
 def check(kernel) -> None:
@@ -53,16 +54,16 @@ def check(kernel) -> None:
 UNROLLED_LOOP = re.compile(r"TILELANG_PRAGMA_UNROLL\s*\n\s*for \(")
 
 
-def test_short_constant_loops_are_unrolled_by_default():
-    body = kernel_body()
-    assert len(re.findall(r"\bfor \(", body)) == 1
-    assert UNROLLED_LOOP.search(body) is not None
+def test_default_unroll_matches_explicit_unroll():
+    # Disable automatic selection for the explicitly unrolled reference.
+    assert kernel_source() == kernel_source(unroll=True, pass_configs=ROLLED)
 
 
 def test_caller_pass_configuration_takes_precedence():
-    body = kernel_body(ROLLED)
-    assert len(re.findall(r"\bfor \(", body)) == 1
-    assert UNROLLED_LOOP.search(body) is None
+    source = kernel_source(pass_configs=ROLLED)
+    assert source != kernel_source(unroll=True, pass_configs=ROLLED)
+    assert len(re.findall(r"\bfor \(", source)) == 1
+    assert UNROLLED_LOOP.search(source) is None
 
 
 @tilelang.testing.requires_metal
